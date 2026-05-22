@@ -1,24 +1,65 @@
-.venv/
-build/
-dist/
+# Python caches
 __pycache__/
 *.py[cod]
 *$py.class
 
-*.log
-*.tmp
-*.bak
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
+# Build and packaging outputs
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+MANIFEST
+*.manifest
 *.exe
 *.msi
 
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test and tool caches
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+
+# Local app data and analysis outputs
 *.csv
 *.xlsx
 *.xls
 
-.DS_Store
-Thumbs.db
-
+# Local editor/tool settings
+.claude/
 .idea/
 .vscode/
-.claude/
+.spyderproject
+.spyproject
+.ropeproject
+
+# Secrets and local environment files
+.env
+.envrc
+local_settings.py
+
+# OS files
+.DS_Store
+Thumbs.db
