@@ -14,6 +14,8 @@ venv.bak/
 # Build and packaging outputs
 build/
 dist/
+release/
+releases/
 downloads/
 eggs/
 .eggs/
@@ -23,6 +25,9 @@ MANIFEST
 *.manifest
 *.exe
 *.msi
+*.dmg
+*.pkg
+*.app/
 
 # Logs and temporary files
 *.log
@@ -46,6 +51,21 @@ htmlcov/
 *.csv
 *.xlsx
 *.xls
+data/
+raw_data/
+raw-data/
+recordings/
+trials/
+exports/
+output/
+outputs/
+results/
+analysis_results/
+reports/
+logs/
+*.qtm
+*.c3d
+*.tsv
 
 # Local editor/tool settings
 .claude/
