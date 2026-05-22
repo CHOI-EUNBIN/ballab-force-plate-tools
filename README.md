@@ -6,62 +6,117 @@ BALLAB Force Plate Tools is built for laboratory use with AMTI-style force plate
 
 ## Visual Walkthrough
 
-The screenshots below are intended to explain the workflow for someone who has never used the app. Use synthetic, demo, or anonymized data only.
+The screenshots below explain the main analysis workflow for someone seeing the project for the first time. Screenshot data should be synthetic, demo, or anonymized.
 
-### 1. Record Force Plate Trials
+### 1. Load Trials and Review COP Motion
 
-![Record tab](assets/screenshots/record-tab.png)
+![Analyze overview](assets/screenshots/analyze-overview.png)
 
-The Record tab is focused on live data collection. It connects to QTM, displays incoming force plate signals, and saves recorded trials as CSV files for later review and analysis.
+The Analyze tab is the offline workspace for saved force plate trials. Users load one or more CSV files, select a trial from the file strip, and inspect COP movement before running metrics.
 
-What this screen shows:
+This view highlights:
 
-- QTM connection and recording controls
-- Force X, Force Y, Force Z monitoring
-- COP AP, COP ML, and COP trajectory visualization
-- Recording status and sampling information
+- Multiple loaded trials with checkboxes for batch analysis
+- A replay timeline for the current trial
+- COP trajectory, COP magnitude, COP AP, and COP ML plots
+- Graph controls for showing or hiding signal groups
 
-### 2. Replay and Inspect Recorded Files
+### 2. Replay the Selected Trial
 
-![Analyze replay](assets/screenshots/analyze-replay.png)
+![Replay controls](assets/screenshots/analyze-replay-controls.png)
 
-The Analyze tab loads saved CSV trials and replays the selected file. This keeps recording and offline inspection separate, so users can review trials without returning to the live recording workflow.
+The replay bar lets users move through the current file frame by frame or press Play to inspect trial quality over time. The selected file is highlighted while other loaded files remain available for comparison.
 
-What this screen shows:
+This view highlights:
 
-- Loaded trial list
-- Trial replay controls
-- Time slider and selected analysis range
-- COP and force signal graphs
-- Graph panel controls for choosing which signals are visible
+- Current frame and elapsed time
+- Trial selector for switching files
+- Full-range reset
+- Playback control for the current displayed file
 
-### 3. Run COP Balance Analysis
+### 3. Add Event Markers
 
-![Analyze results](assets/screenshots/analyze-results.png)
+![Add event dialog](assets/screenshots/add-event-force-threshold.png)
 
-After selecting files and metrics, the Analyze tab computes balance metrics for the selected time range. Results are shown as metric cards and can be exported for reporting.
+Events mark meaningful moments in the trial, such as a force threshold crossing or a time-based point. Events can be used as visual markers and as boundaries for later export ranges.
 
-What this screen shows:
+This view highlights:
 
-- Selected analysis range
-- COP trajectory and 95% ellipse
-- Metric cards for the current analysis result
-- Event markers overlaid on time-series plots
-- Export workflow for Excel output
+- Event name and marker color
+- Source signal selection, such as Fz or Time
+- Threshold condition setup
+- Search range controls
 
-### 4. Configure Signal Processing
+### 4. Choose Graphs, Metrics, and Events
 
-![Settings tab](assets/screenshots/settings-tab.png)
+![Analyze controls](assets/screenshots/analyze-sidebar-controls.png)
 
-The Settings tab controls how incoming force plate data is converted before recording and how analysis filters are applied.
+The left sidebar keeps analysis controls close to the plots. Users can choose which graphs are visible, select metrics, run analysis, and review detected events.
 
-What this screen shows:
+This view highlights:
 
-- Axis sign correction for force, moment, and COP channels
-- Analysis filter settings
-- Reserved options for future normalization workflows
+- Collapsible Graph, Metrics, and Event sections
+- COP and force signal visibility toggles
+- Metric selection before running analysis
+- Event list for reviewing or deleting markers
 
-No participant data, real trial identifiers, or private lab files should be visible in screenshots.
+### 5. Inspect Force Signals
+
+![Force plots](assets/screenshots/analyze-force-signals.png)
+
+Force X, Force Y, and Force Z can be displayed alongside COP data. This helps users check whether force behavior matches the COP movement and event timing.
+
+This view highlights:
+
+- COP plot synchronized with force plots
+- Force X, Force Y, and Force Z traces
+- Shared time axis for visual comparison
+- Event marker overlay across visible time-series plots
+
+### 6. Review Balance Metrics
+
+![Metric cards](assets/screenshots/analyze-metric-cards.png)
+
+After analysis, selected COP metrics are shown as compact result cards. This gives quick feedback before exporting a full workbook.
+
+This view highlights:
+
+- RMS, range, ellipse, path length, velocity, and frequency metrics
+- Units displayed with each result
+- Current analyzed file and selected time range
+- Horizontally scrollable result cards
+
+### 7. Define Event-Based Export Ranges
+
+![Add time event](assets/screenshots/add-event-time.png)
+
+![Add analysis range](assets/screenshots/add-analysis-range.png)
+
+Event markers can define analysis windows. For example, a user can mark the start and end of a standing phase, then export only metrics from that window.
+
+This view highlights:
+
+- Time-based event creation
+- Event-to-event analysis range setup
+- Per-range metric selection
+- Reusable named analysis ranges
+
+### 8. Export Results to Excel
+
+![Included files sheet](assets/screenshots/export-included-files.png)
+
+![Descriptive statistics sheet](assets/screenshots/export-descriptive-statistics.png)
+
+Exported workbooks summarize the included files, per-range descriptive statistics, individual metric results, and event markers. This keeps raw trial data out of the repository while preserving analysis outputs locally.
+
+This view highlights:
+
+- Included file summary
+- Analyzed frame ranges
+- Descriptive statistics by analysis range and metric
+- Separate workbook sheets for files, statistics, results, and events
+
+No participant data, real trial identifiers, private file paths, or lab records should be visible in screenshots.
 
 ## Current Features
 
