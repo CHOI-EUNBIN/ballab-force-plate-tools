@@ -1,8 +1,8 @@
 # BALLAB Force Plate Tools
 
-Desktop software for recording, replaying, visualizing, and analyzing force plate data for balance and center-of-pressure (COP) research workflows.
+**A desktop research tool for recording, replaying, visualizing, and analyzing force plate balance data.**
 
-BALLAB Force Plate Tools is built for laboratory use with AMTI-style force plate signals and QTM streaming. The application separates live recording from offline analysis so recorded trials can be reviewed, compared, marked with events, analyzed, and exported without including raw research data in the repository.
+BALLAB Force Plate Tools supports balance assessment workflows built around force plate signals and center-of-pressure (COP) analysis. It is designed to separate live recording from offline analysis: users can collect trials through QTM, load saved CSV files, replay each trial, inspect COP and force signals, mark events, compute selected balance metrics, and export analysis results to Excel without committing raw research data to the repository.
 
 ## Visual Walkthrough
 
