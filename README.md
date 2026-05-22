@@ -100,7 +100,8 @@ The `.gitignore` file excludes common raw data, output, virtual environment, and
 From PowerShell:
 
 ```powershell
-cd C:\Users\eunbin\Downloads\BalanceAnalyzer\BalanceAnalyzer
+git clone https://github.com/CHOI-EUNBIN/ballab-force-plate-tools.git
+cd ballab-force-plate-tools
 .\setup_dev.bat
 .\run_dev.bat
 ```
