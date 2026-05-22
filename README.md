@@ -107,6 +107,10 @@ This view highlights:
 
 ![Descriptive statistics sheet](assets/screenshots/export-descriptive-statistics.png)
 
+![Analysis results sheet](assets/screenshots/export-analysis-results.png)
+
+![Events sheet](assets/screenshots/export-events.png)
+
 Exported workbooks summarize the included files, per-range descriptive statistics, individual metric results, and event markers. This keeps raw trial data out of the repository while preserving analysis outputs locally.
 
 This view highlights:
@@ -114,6 +118,8 @@ This view highlights:
 - Included file summary
 - Analyzed frame ranges
 - Descriptive statistics by analysis range and metric
+- Per-file metric values for each named analysis range
+- Event frame summary for each exported trial
 - Separate workbook sheets for files, statistics, results, and events
 
 No participant data, real trial identifiers, private file paths, or lab records should be visible in screenshots.

@@ -14,6 +14,8 @@ Recommended filenames:
 - `add-analysis-range.png`
 - `export-included-files.png`
 - `export-descriptive-statistics.png`
+- `export-analysis-results.png`
+- `export-events.png`
 
 Optional additional screenshots:
 
