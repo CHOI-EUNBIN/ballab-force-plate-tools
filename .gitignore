@@ -66,6 +66,9 @@ logs/
 *.qtm
 *.c3d
 *.tsv
+!examples/
+!examples/*.csv
+!examples/README.md
 
 # Local editor/tool settings
 .claude/

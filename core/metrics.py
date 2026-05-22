@@ -29,7 +29,7 @@ def compute_metrics(cop_ap, cop_ml, fs, selected_keys):
     ml = np.array(cop_ml, dtype=float)
     ap_c = ap - np.mean(ap)
     ml_c = ml - np.mean(ml)
-    duration = n / fs
+    duration = (n - 1) / fs
 
     for key in selected_keys:
         try:
@@ -54,9 +54,9 @@ def compute_metrics(cop_ap, cop_ml, fs, selected_keys):
             elif key == "95% Ellipse area":
                 cov = np.cov(np.vstack([ap_c, ml_c]))
                 eigvals = np.abs(np.linalg.eigvalsh(cov))
-                chi2_val = chi2_dist.ppf(0.95, df=2)   # ≈ 5.991
+                chi2_val = chi2_dist.ppf(0.95, df=2)   # ~= 5.991
                 area = np.pi * chi2_val * np.sqrt(eigvals[0] * eigvals[1])
-                results[key] = (float(area), "mm²")
+                results[key] = (float(area), "mm^2")
 
             elif key == "Sway path length":
                 path = float(np.sum(np.sqrt(np.diff(ap) ** 2 + np.diff(ml) ** 2)))

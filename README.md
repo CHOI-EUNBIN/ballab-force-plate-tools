@@ -1,8 +1,25 @@
 # BALLAB Force Plate Tools
 
-**A desktop research tool for recording, replaying, visualizing, and analyzing force plate balance data.**
+**A desktop application for AMTI/QTM force plate recording, COP visualization, trial replay, event marking, and Excel-based balance analysis export.**
 
-BALLAB Force Plate Tools supports balance assessment workflows built around force plate signals and center-of-pressure (COP) analysis. It is designed to separate live recording from offline analysis: users can collect trials through QTM, load saved CSV files, replay each trial, inspect COP and force signals, mark events, compute selected balance metrics, and export analysis results to Excel without committing raw research data to the repository.
+BALLAB Force Plate Tools helps biomechanics researchers record, replay, visualize, and analyze force plate data for balance and center-of-pressure (COP) workflows. The app separates live recording from offline analysis, so saved trials can be reviewed, marked with events, analyzed by selected time windows, and exported to Excel while keeping raw participant data outside the public repository.
+
+![Analyze overview](assets/screenshots/analyze-overview.png)
+
+## What It Does
+
+- Records force plate data through QTM-based live streaming.
+- Loads saved CSV trials for offline replay and inspection.
+- Visualizes COP trajectory, COP AP/ML, COP magnitude, and force signals.
+- Adds event markers based on time or signal conditions.
+- Defines event-based analysis ranges.
+- Computes COP balance metrics and exports Excel workbooks.
+
+## Preview
+
+| COP Review | Force Signals | Excel Export |
+|---|---|---|
+| ![Analyze overview](assets/screenshots/analyze-overview.png) | ![Force plots](assets/screenshots/analyze-force-signals.png) | ![Descriptive statistics sheet](assets/screenshots/export-descriptive-statistics.png) |
 
 ## Visual Walkthrough
 
@@ -145,6 +162,16 @@ No participant data, real trial identifiers, private file paths, or lab records 
 - Excel export for analysis results, descriptive statistics, included files, and events.
 - Settings for live axis sign correction and analysis filter options.
 - Windows build scripts and PyInstaller configuration.
+
+## Metric Documentation
+
+COP and balance metrics are documented in [COP Metrics Guide](docs/cop-metrics-guide.md).
+
+## Demo Data
+
+Synthetic example trials are provided in [`examples/`](examples/) for interface testing only. These files are generated demo signals and do not contain participant, patient, or experimental data.
+
+You can load the example CSV files from the Analyze tab to try replay, graph selection, metric calculation, event marking, and Excel export without using private research data.
 
 ## Planned Features
 
