@@ -1,0 +1,7 @@
+PyQt6>=6.5.0
+pyqtgraph>=0.13.0
+numpy>=1.24.0
+scipy>=1.10.0
+qtm-rt>=3.0.0,<4.0.0
+pyinstaller>=6.0.0
+openpyxl>=3.1.0
