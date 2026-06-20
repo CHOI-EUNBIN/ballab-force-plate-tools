@@ -146,8 +146,8 @@ class SettingsTab(QWidget):
         arrow_btn.setCheckable(True)
         arrow_btn.setChecked(False)
         arrow_btn.setStyleSheet(
-            f"background:{BG_INPUT}; color:{TEXT_SECONDARY}; border:1px solid {BORDER};"
-            "border-radius:4px; padding:0; font-size:11px;"
+            f"background:transparent; color:{TEXT_SECONDARY}; border:none;"
+            "border-radius:4px; padding:0; font-size:11px; font-weight:600;"
         )
 
         header.addWidget(title_lbl, 1)
@@ -186,7 +186,8 @@ class SettingsTab(QWidget):
         toggle = QPushButton()
         toggle.setCheckable(True)
         toggle.setChecked(bool(checked))
-        toggle.setFixedWidth(116)
+        toggle.setFixedHeight(22)
+        toggle.setMinimumWidth(58)
         toggle.clicked.connect(callback)
         toggle.clicked.connect(lambda _checked, b=toggle, off=off_text, on=on_text: self._style_toggle(b, off, on))
         self._style_toggle(toggle, off_text, on_text)
@@ -237,10 +238,9 @@ class SettingsTab(QWidget):
     def _style_toggle(self, button, off_text, on_text):
         checked = button.isChecked()
         button.setText(on_text if checked else off_text)
-        bg = ACCENT_TEAL if checked else BG_INPUT
-        fg = "#FFFFFF" if checked else TEXT_SECONDARY
-        border = ACCENT_TEAL if checked else BORDER
+        bg = "rgba(34, 162, 106, 0.14)" if checked else "transparent"
+        fg = ACCENT_TEAL if checked else TEXT_SECONDARY
         button.setStyleSheet(
-            f"background:{bg}; color:{fg}; border:1px solid {border};"
-            "border-radius:13px; padding:4px 12px; font-size:12px;"
+            f"background:{bg}; color:{fg}; border:none;"
+            "border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600;"
         )

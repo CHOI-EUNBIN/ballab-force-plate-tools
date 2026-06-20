@@ -6,10 +6,10 @@ cd "$(dirname "$0")"
 PYTHON="${PYTHON:-python3}"
 
 echo
-echo " === BALLAB macOS Build ==="
+echo " === Balancelab macOS Build ==="
 echo
 
-"$PYTHON" -m PyInstaller --clean BALLAB.spec
+"$PYTHON" -m PyInstaller --clean Balancelab.spec
 
 echo
-echo "[DONE] dist/BALLAB"
+echo "[DONE] dist/Balancelab"

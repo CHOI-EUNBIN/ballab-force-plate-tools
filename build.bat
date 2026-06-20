@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo.
-echo  === BALLAB Build ===
+echo  === Balancelab Build ===
 echo.
 
 set PYTHON=
@@ -36,15 +36,15 @@ if errorlevel 1 (
 )
 
 echo [1/2] Cleaning old build...
-if exist "dist\BALLAB.exe" del /f /q "dist\BALLAB.exe"
-if exist "build\BALLAB" rd /s /q "build\BALLAB"
+if exist "dist\Balancelab.exe" del /f /q "dist\Balancelab.exe"
+if exist "build\Balancelab" rd /s /q "build\Balancelab"
 
 echo [2/2] Building...
-!PYTHON! -m PyInstaller --clean BALLAB.spec
+!PYTHON! -m PyInstaller --clean Balancelab.spec
 
-if exist "dist\BALLAB.exe" (
+if exist "dist\Balancelab.exe" (
     echo.
-    echo [DONE] dist\BALLAB.exe
+    echo [DONE] dist\Balancelab.exe
 ) else (
     echo.
     echo [FAILED] See error above.

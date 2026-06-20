@@ -1,6 +1,6 @@
 # COP Metrics Guide
 
-This document explains the center-of-pressure (COP) metrics currently calculated by BALLAB Force Plate Tools. The formulas below are based on the current implementation in `core/metrics.py`.
+This document explains the center-of-pressure (COP) metrics currently calculated by Balancelab Force Plate Tools. The formulas below are based on the current implementation in `core/metrics.py`.
 
 ## Input Data
 
@@ -87,7 +87,7 @@ Interpretation:
 
 ### 95% Ellipse Area
 
-The 95% ellipse area estimates the area of the chi-square-based 95% COP ellipse in AP-ML space. BALLAB calculates the covariance matrix of centered AP and ML data, then uses the 95% chi-square value for two dimensions.
+The 95% ellipse area estimates the area of the chi-square-based 95% COP ellipse in AP-ML space. Balancelab calculates the covariance matrix of centered AP and ML data, then uses the 95% chi-square value for two dimensions.
 
 ```text
 cov = covariance([AP_centered, ML_centered])
@@ -139,7 +139,7 @@ Interpretation:
 
 Frequency metrics are calculated separately for AP and ML directions using the centered COP signal.
 
-BALLAB computes the one-sided FFT frequency bins and spectral power:
+Balancelab computes the one-sided FFT frequency bins and spectral power:
 
 ```text
 freqs = rfftfreq(n, 1 / fs)

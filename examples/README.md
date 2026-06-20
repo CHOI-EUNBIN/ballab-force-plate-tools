@@ -1,6 +1,6 @@
 # Synthetic Demo Data
 
-This folder contains synthetic CSV trials for testing the BALLAB Force Plate Tools interface.
+This folder contains synthetic CSV trials for testing the Balancelab Force Plate Tools interface.
 
 The demo files are generated signals only. They do not contain participant, patient, or experimental data.
 

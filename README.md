@@ -1,8 +1,8 @@
-# BALLAB Force Plate Tools
+# Balancelab Force Plate Tools
 
 **A desktop application for AMTI/QTM force plate recording, COP visualization, trial replay, event marking, and Excel-based balance analysis export.**
 
-BALLAB Force Plate Tools helps biomechanics researchers record, replay, visualize, and analyze force plate data for balance and center-of-pressure (COP) workflows. The app separates live recording from offline analysis, so saved trials can be reviewed, marked with events, analyzed by selected time windows, and exported to Excel while keeping raw participant data outside the public repository.
+Balancelab Force Plate Tools helps biomechanics researchers record, replay, visualize, and analyze force plate data for balance and center-of-pressure (COP) workflows. The app separates live recording from offline analysis, so saved trials can be reviewed, marked with events, analyzed by selected time windows, and exported to Excel while keeping raw participant data outside the public repository.
 
 ![Analyze overview](assets/screenshots/analyze-overview.png)
 
@@ -199,7 +199,7 @@ These items are planned or reserved and should not be treated as completed funct
 |-- run_dev.bat             # Run the app from the local virtual environment
 |-- build.bat               # Windows build helper
 |-- build_macos.sh          # macOS build helper
-|-- BALLAB.spec             # PyInstaller spec file
+|-- Balancelab.spec             # PyInstaller spec file
 `-- installer.iss           # Inno Setup installer script
 ```
 

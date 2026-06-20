@@ -4,7 +4,7 @@ chcp 65001 > nul 2>&1
 cd /d "%~dp0"
 
 echo.
-echo  === BALLAB Development Setup ===
+echo  === Balancelab Development Setup ===
 echo.
 
 set PYTHON=

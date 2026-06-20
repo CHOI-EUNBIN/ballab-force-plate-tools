@@ -24,9 +24,11 @@ def _import_or_exit(module_name, package_hint):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BALLAB")
+    parser = argparse.ArgumentParser(description="Balancelab")
     parser.add_argument("--ip", default="127.0.0.1",
                         help="QTM host IP (default: 127.0.0.1)")
+    parser.add_argument("project", nargs="?", default=None,
+                        help="Optional .ballab project file to open on launch")
     args = parser.parse_args()
 
     qt_widgets = _import_or_exit("PyQt6.QtWidgets", "-r requirements.txt")
@@ -36,10 +38,12 @@ def main():
     from ui.main_window import MainWindow, resource_path
 
     app = QApplication(sys.argv)
-    app.setApplicationName("BALLAB")
+    app.setApplicationName("Balancelab")
     app.setWindowIcon(QIcon(resource_path("assets/ballab_icon_master_1024_transparent.png")))
     win = MainWindow(qtm_ip=args.ip)
     win.show()
+    if args.project and os.path.isfile(args.project):
+        win.open_project_path(args.project)
     sys.exit(app.exec())
 
 

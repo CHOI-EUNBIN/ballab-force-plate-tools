@@ -9,7 +9,7 @@ class AxisSettings(QObject):
 
     def __init__(self):
         super().__init__()
-        self._settings = QSettings("BALLAB", "BALLAB")
+        self._settings = QSettings("Balancelab", "Balancelab")
         self.live_signs = self._load_signs()
         self.foot_displacement_normalized = self._load_bool(
             "analysis/foot_displacement_normalized", False

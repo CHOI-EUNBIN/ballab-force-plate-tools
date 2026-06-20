@@ -4,7 +4,7 @@ chcp 65001 > nul 2>&1
 
 echo.
 echo  ====================================================
-echo    BALLAB - Environment Setup
+echo    Balancelab - Environment Setup
 echo  ====================================================
 echo.
 

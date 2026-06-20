@@ -1,16 +1,16 @@
 ; ============================================================
-;  BALLAB  -  Inno Setup 설치 스크립트
+;  Balancelab  -  Inno Setup 설치 스크립트
 ;  사용법:
 ;    1. Inno Setup 6.x 설치: https://jrsoftware.org/isdl.php
-;    2. 먼저 build.bat 을 실행해 dist\BALLAB.exe 생성
+;    2. 먼저 build.bat 을 실행해 dist\Balancelab.exe 생성
 ;    3. 이 파일을 Inno Setup Compiler 로 열고 Build > Compile
-;    4. Output\ 폴더에 BALLABSetup.exe 생성됨
+;    4. Output\ 폴더에 BalancelabSetup.exe 생성됨
 ; ============================================================
 
-#define AppName      "BALLAB"
+#define AppName      "Balancelab"
 #define AppVersion   "1.0"
 #define AppPublisher "광운대학교 생체역학 연구실"
-#define AppExeName   "BALLAB.exe"
+#define AppExeName   "Balancelab.exe"
 #define AppURL       ""
 
 [Setup]
@@ -27,7 +27,7 @@ CloseApplications=yes
 CloseApplicationsFilter=*.exe
 ; 출력 설정
 OutputDir=Output
-OutputBaseFilename=BALLABSetup
+OutputBaseFilename=BalancelabSetup
 SetupIconFile=assets\ballab_icon.ico
 ; 압축
 Compression=lzma2/ultra64
