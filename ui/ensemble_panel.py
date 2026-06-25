@@ -5,6 +5,7 @@ UI-thin: all math is in core.ensemble / core.normalize. The panel is fed
 ``(file_label, norm_dict)`` sources by the Analyze tab (one per checked trial
 that produced the chosen NormalizeStep output).
 """
+import re
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
@@ -47,9 +48,13 @@ class EnsemblePanel(QWidget):
         self._plot.addItem(self._band)
         v.addWidget(self._plot, 1)
 
-    def set_sources(self, sources):
+    def set_sources(self, sources, title=None):
         """``sources`` = list of ``(file_label, norm_dict)`` where ``norm_dict`` has
-        ``matrix`` (N_i x P). Pools, recomputes stats, redraws."""
+        ``matrix`` (N_i x P). Pools, recomputes stats, redraws.
+
+        Optional ``title`` kwarg sets the panel title (e.g. including the step name)."""
+        if title is not None:
+            self._title.setText(title)
         self._sources = list(sources or [])
         mats, cols = [], []
         for label, nd in self._sources:
@@ -63,6 +68,11 @@ class EnsemblePanel(QWidget):
         self._stats = ensemble_stats(matrix)
         self._n_label.setText(f"{self._stats['n']} epochs")
         self._redraw()
+
+    def set_title_suffix(self, text):
+        """Update the panel title to include ``text`` as a suffix, e.g. the step name."""
+        base = "Ensemble (% cycle)"
+        self._title.setText(f"{base} — {text}" if text else base)
 
     def n_epochs(self):
         return int(self._stats.get("n", 0))
@@ -146,9 +156,13 @@ class NormalizeStepDialog(QDialog):
                 j = combo.findText(val)
                 if j >= 0:
                     combo.setCurrentIndex(j)
-        form.addRow("Event (cycle)", self.event_combo)
-        form.addRow("Start event", self.start_combo)
-        form.addRow("End event", self.end_combo)
+        # Store label widgets explicitly so we can show/hide them per mode.
+        self._event_label = QLabel("Event (cycle)")
+        self._start_label = QLabel("Start event")
+        self._end_label = QLabel("End event")
+        form.addRow(self._event_label, self.event_combo)
+        form.addRow(self._start_label, self.start_combo)
+        form.addRow(self._end_label, self.end_combo)
 
         self.points_spin = QSpinBox()
         self.points_spin.setRange(2, 1001)
@@ -161,10 +175,35 @@ class NormalizeStepDialog(QDialog):
         bb.rejected.connect(self.reject)
         form.addRow(bb)
 
+        # Wire mode → event-row visibility and set initial state.
+        self.mode_combo.currentIndexChanged.connect(self._sync_event_rows)
+        self._sync_event_rows()
+
+    def _sync_event_rows(self, _index=None):
+        """Show only the event rows relevant to the current epoch mode.
+
+        cycle  → "Event (cycle)" only
+        window → "Start event" + "End event" only
+        trial  → none of the three rows
+        """
+        mode = self.mode_combo.currentData()
+        is_cycle = mode == "cycle"
+        is_window = mode == "window"
+        self._event_label.setVisible(is_cycle)
+        self.event_combo.setVisible(is_cycle)
+        self._start_label.setVisible(is_window)
+        self.start_combo.setVisible(is_window)
+        self._end_label.setVisible(is_window)
+        self.end_combo.setVisible(is_window)
+
     def values(self):
+        raw_name = self.name_edit.text().strip()
+        # Sanitize: spaces and colons become underscores so the key "norm:<name>"
+        # is always well-formed (no embedded colons or whitespace).
+        safe_name = re.sub(r"[\s:]+", "_", raw_name)
         return {
             "input": self.input_combo.selected_key() or "",
-            "name": self.name_edit.text().strip(),
+            "name": safe_name,
             "mode": self.mode_combo.currentData(),
             "event": self.event_combo.currentText(),
             "start_event": self.start_combo.currentText(),

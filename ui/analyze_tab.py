@@ -1527,7 +1527,11 @@ class AnalyzeTab(QWidget):
             nd = normalized.get(norm_name)
             if nd is not None:
                 sources.append((ds.get("name", f"trial_{i}"), nd))
-        panel.set_sources(sources)
+        # Show the step name in the panel title so it's clear which NormalizeStep
+        # is being displayed (avoids silent "first step only" confusion).
+        signal_key = getattr(norm_step, "input", "") or ""
+        panel_title = f"Ensemble — {signal_key} [{norm_name}]" if signal_key else f"Ensemble — [{norm_name}]"
+        panel.set_sources(sources, title=panel_title)
 
     # -- which signals are currently graphed (for the ● tag) ---------------
     def _is_signal_graphed(self, key):
