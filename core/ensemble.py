@@ -42,3 +42,27 @@ def ensemble_stats(matrix):
         sd = np.nanstd(m, axis=0, ddof=1) if m.shape[0] > 1 else np.zeros(p)
     return {"mean": mean, "sd": sd, "n": int(m.shape[0]),
             "x": np.linspace(0.0, 100.0, p)}
+
+
+def ensemble_csv(matrix, stats, columns=None):
+    """CSV text for a pooled ensemble: rows = phase nodes (0-100%), columns =
+    each epoch + mean + sd. ``columns`` labels the K epoch columns (defaults to
+    ``epoch_1..epoch_K``). One node per row; values are the transpose of
+    ``matrix`` (which is epochs x nodes)."""
+    m = np.asarray(matrix, float)
+    k = m.shape[0] if m.ndim == 2 else 0
+    cols = list(columns) if columns is not None else [f"epoch_{i+1}" for i in range(k)]
+    x = stats.get("x")
+    mean = stats.get("mean")
+    sd = stats.get("sd")
+    header = ",".join(["percent", *cols, "mean", "sd"])
+    out = [header]
+    p = len(x) if x is not None else 0
+    for node in range(p):
+        cells = [f"{x[node]}"]
+        for e in range(k):
+            cells.append(f"{m[e, node]}")
+        cells.append(f"{mean[node]}")
+        cells.append(f"{sd[node]}")
+        out.append(",".join(cells))
+    return "\n".join(out) + "\n"
