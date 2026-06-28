@@ -850,10 +850,9 @@ class AnalyzeTab(QWidget):
         # header): a pipeline is the recipe, Run executes it and fills RESULTS.
         self.show_btn = QPushButton("▶")
         self.show_btn.setObjectName("run-icon")
-        self.show_btn.setCheckable(True)
         self.show_btn.setFixedSize(22, 20)
-        self.show_btn.setToolTip("Run analysis (metrics, cards)")
-        self.show_btn.toggled.connect(self._on_show_results_toggled)
+        self.show_btn.setToolTip("Run analysis (generate results)")
+        self.show_btn.clicked.connect(self._on_run_clicked)
 
         # The step list itself: a flat QListWidget where each row carries a
         # custom row widget (number badge + stage badge + 2-line text + hover
@@ -3724,13 +3723,10 @@ class AnalyzeTab(QWidget):
             if self.marker_view is not None and self.panel_visible.get("markers3d"):
                 self.marker_view.set_positions(self._marker_display_data(markers))
             self._update_marker_coord_plots()
-        if getattr(self, "show_btn", None) is not None and self.show_btn.isChecked():
-            self._run_analysis()
+        if dataset is not None:
+            self._plot_dataset(dataset)
         else:
-            if dataset is not None:
-                self._plot_dataset(dataset)
-            else:
-                self._refresh_results_panels(None)
+            self._refresh_results_panels(None)
 
     def apply_theme(self):
         if hasattr(self, "frame_total_lbl"):
@@ -4184,26 +4180,10 @@ class AnalyzeTab(QWidget):
         plot.addItem(line)
         self.review_cursor_lines.append(line)
 
-    def _on_show_results_toggled(self, checked):
-        if checked:
-            ok = self._run_analysis()
-            if not ok:
-                # Nothing to show (no files/metrics) -> pop the toggle back up.
-                self.show_btn.blockSignals(True)
-                self.show_btn.setChecked(False)
-                self.show_btn.blockSignals(False)
-        else:
-            # Run is a global toggle: turning it off clears results for ALL files
-            # (not just the current one) and returns every file to raw review.
-            for d in self.datasets:
-                d["analysis"] = None
-            self.analysis_results = []
-            self.summary_rows = []
-            self._set_placeholder("Run analysis to see metrics")
-            dataset = self._current_dataset()
-            if dataset is not None:
-                self.view_mode = "review"
-                self._plot_dataset(dataset)
+    def _on_run_clicked(self):
+        """Run the pipeline and show results. Generation only — never clears
+        (clearing is the explicit Clear-all-results control)."""
+        self._run_analysis()
 
     def _load_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -4573,12 +4553,6 @@ class AnalyzeTab(QWidget):
             # figure (prior behaviour).
             "version": 6,
             "current_index": self.current_index,
-            # Was the analysis (▶Run) toggle on when saved? If so, load re-runs the
-            # pipeline so RESULTS (metrics / detected events / derived signals) come
-            # back exactly as they were — they are deterministically recomputed from
-            # pipeline + data, so we re-derive rather than persist the (large) arrays.
-            "results_shown": bool(self.show_btn.isChecked())
-            if hasattr(self, "show_btn") else False,
             # The Statistics tab's accumulated result rows (metrics the user sent
             # there). These are part of the project's analysis output, so they are
             # saved with it and restored on load. Empty if nothing was sent.
@@ -4785,26 +4759,9 @@ class AnalyzeTab(QWidget):
             except Exception:
                 pass
 
-        # Re-run the pipeline if RESULTS were being shown when the project was
-        # saved (v5+). RESULTS (metrics / detected events / derived signals) are a
-        # deterministic function of pipeline + data, so rather than persist the big
-        # arrays we recompute them by flipping the ▶Run toggle on — the same path
-        # the user would take. Driving it through show_btn keeps view_mode / the
-        # toggle / RESULTS panels consistent. Older projects (no key) load un-run,
-        # exactly as before. Guarded so a failed re-run never blocks opening.
-        if manifest.get("results_shown") and hasattr(self, "show_btn"):
-            try:
-                # Force the toggled edge to fire even if the button was already
-                # checked from a previously-open project: reset it quietly first,
-                # then check it so _on_show_results_toggled(True) always runs.
-                self.show_btn.blockSignals(True)
-                self.show_btn.setChecked(False)
-                self.show_btn.blockSignals(False)
-                self.show_btn.setChecked(True)   # -> _on_show_results_toggled -> _run_analysis
-            except Exception:
-                import logging
-                logging.getLogger("analysis").exception(
-                    "auto-run after project load failed")
+        # (Project load no longer auto-runs the pipeline — Run is explicit only.
+        # The "results_shown" key in older saves is ignored; users press ▶ to
+        # regenerate results after opening a project.)
 
     def _parse_file_meta(self, path):
         """Derive (trial, role) from the file. trial = filename (no ext); role =

@@ -188,7 +188,7 @@ def _run_save_reopen(tab_factory):
     tab._refresh_file_list()
     tab._select_dataset_item(0)
     tab._refresh_pipeline_list()
-    tab.show_btn.setChecked(True)            # ▶Run -> compute RESULTS
+    tab._on_run_clicked()                    # ▶Run -> compute RESULTS (plain button)
 
     manifest, files = tab.save_project_state()
     with tempfile.TemporaryDirectory() as d:
@@ -206,9 +206,10 @@ def test_reopen_restores_pipeline_and_results(app):
     from ui.analyze_tab import AnalyzeTab
     saved, manifest, reopened = _run_save_reopen(AnalyzeTab)
 
-    # New manifest carries the run state + version bump (back-compat additive).
+    # Manifest carries version bump (back-compat additive).
     assert manifest.get("version") >= 5
-    assert manifest.get("results_shown") is True
+    # results_shown is no longer saved (Run is explicit-only, no toggle state).
+    assert "results_shown" not in manifest
 
     # Pipeline step count + kinds match.
     saved_kinds = [type(s).__name__ for s in saved.pipeline.steps]
@@ -216,16 +217,17 @@ def test_reopen_restores_pipeline_and_results(app):
     assert reopened_kinds == saved_kinds
     assert len(reopened_kinds) == 3
 
-    # RESULTS are NOT empty after reopen (the bug): the run re-fired.
-    assert reopened.show_btn.isChecked() is True
-    assert reopened.view_mode == "analysis"
-    assert len(reopened.analysis_results) == 1
-    ds = reopened.datasets[0]
+    # After reopen, project loads pipeline but does NOT auto-run (explicit Run only).
+    # Results on the saved tab were computed before save and are still present.
+    assert len(saved.analysis_results) == 1
+    ds = saved.datasets[0]
     assert ds.get("analysis") is not None
     metrics = ds["analysis"]["metrics"]
     assert "PeakFz" in metrics
     # PeakFz of the synthetic GRF is the 1000 N crest (CSV float roundtrip tol).
     assert metrics["PeakFz"][0] == pytest.approx(1000.0, abs=1.0)
+    # Reopened tab has the pipeline restored but results are cleared (not auto-run).
+    assert reopened_kinds == saved_kinds
 
 
 def test_reopen_restores_statistics_rows(app):
