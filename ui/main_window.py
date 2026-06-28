@@ -169,8 +169,10 @@ class MainWindow(QMainWindow):
         self.ai_dock = QDockWidget("AI 도우미", self)
         self.ai_dock.setObjectName("aiDock")
         self.ai_dock.setWidget(self.ai_panel)
-        self.ai_dock.setAllowedAreas(
-            Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea)
+        # 드래그로 떼어내거나(floating) 다른 영역에 끼우다(split) 사라지는 혼란을 막기 위해
+        # 이동/플로팅을 끄고 닫기만 허용 — 우측 고정. 여닫기는 Help 토글 또는 X로만.
+        self.ai_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.ai_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.ai_dock)
         self.resizeDocks([self.ai_dock], [360], Qt.Orientation.Horizontal)
         self.ai_dock.hide()  # 시작 시 숨김 — 토글로 표시
