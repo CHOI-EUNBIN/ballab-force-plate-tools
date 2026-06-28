@@ -102,6 +102,10 @@ class AiAssistantPanel(QWidget):
         self.status_dot.setObjectName("statusDot")
         self.status_text = QLabel("Checking…")
         self.status_text.setObjectName("statusText")
+        # 상태 글자/점을 클릭하면 연결을 다시 확인(재연결).
+        self.status_text.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_text.setToolTip("클릭하면 연결을 다시 확인합니다 / Click to reconnect")
+        self.status_text.mousePressEvent = lambda e: self._check_health()
         status.addWidget(self.status_dot)
         status.addWidget(self.status_text)
         status.addStretch(1)
@@ -261,6 +265,8 @@ class AiAssistantPanel(QWidget):
         self._on_ask()
 
     def _check_health(self):
+        if self._health_worker and self._health_worker.isRunning():
+            return  # 이미 확인 중이면 중복 방지
         self.status_text.setText("Checking…")
         self._health_worker = HealthWorker(self.base_url)
         self._health_worker.result.connect(self._on_health)
@@ -324,6 +330,7 @@ class AiAssistantPanel(QWidget):
         if res.get("error"):  # 방어적(서비스가 200으로 error 준 경우)
             self._render_error(res["error"])
             return
+        self._set_dot(S.ACCENT_GREEN)  # 답이 왔으니 연결 정상
         answer_text = res.get("answer", "")
         if self._pending_body is not None:
             self._pending_body.setStyleSheet("")
@@ -357,6 +364,7 @@ class AiAssistantPanel(QWidget):
             return
         self._stop_dots()
         self._set_busy(False)
+        self._set_dot(S.ACCENT_RED)  # 실패 = 연결 문제일 수 있음
         self._render_error(msg)
 
     def _render_error(self, msg):
@@ -381,6 +389,12 @@ class AiAssistantPanel(QWidget):
         """설정창에서 URL 변경 시 호출 — 갱신 후 연결 상태 재확인."""
         self.base_url = url or "http://localhost:8000"
         self._check_health()
+
+    def showEvent(self, e):
+        # 패널을 (다시) 열 때마다 연결 상태를 재확인 → 토글로 재연결.
+        super().showEvent(e)
+        if not self._closing:
+            self._check_health()
 
     def shutdown(self):
         """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지).
