@@ -1,22 +1,22 @@
 # ui/ai_assistant_panel.py
-# RAG 질의응답 패널(독립 QWidget). 네트워크 호출은 워커 스레드에서만(UI 안 얼게).
-# Task 5에서 QDockWidget에 담아 메인 창 오른쪽에 붙인다.
+# RAG 질의응답 패널(독립 QWidget) — 채팅형 UI.
+# 네트워크 호출은 워커 스레드에서만(UI 안 얼게). Task 5에서 QDockWidget에 담아 우측에 붙인다.
+# 색·치수는 ui.style 토큰(S.*)만 사용(테마 적응). 이모지 금지.
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
-    QPushButton, QTextBrowser,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QScrollArea, QFrame,
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 
 from ui import style as S
 from core import rag_client
 
+# 빈 상태 예시 질문 2개(세로). mode는 항상 auto.
 EXAMPLES = [
-    ("step width SD가 뭔가요?", "auto"),
-    ("결과를 어떻게 내보내나요?", "manual"),
-    ("국소 동적 안정성과 보행 변동성 차이는?", "paper"),
+    "step width SD가 뭔가요?",
+    "결과를 어떻게 내보내나요?",
 ]
-MODES = [("자동", "auto"), ("사용법", "manual"), ("논문", "paper")]
 
 
 def doi_url(doi):
@@ -76,103 +76,200 @@ class AiAssistantPanel(QWidget):
         self._health_worker = None
         self._closing = False
         self._dots = 0
+        self._has_messages = False
+        self._last_question = ""
+        self._pending_body = None
+        self._pending_src = None
         self.setObjectName("aiPanel")
         self.setMinimumWidth(320)
         self._build_ui()
         self._apply_style()
+        self._show_empty()
         self._check_health()
 
+    # ---- UI 골격 ----
     def _build_ui(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
+        # 연결 상태(작고 차분하게, 상단 한 줄)
+        status = QHBoxLayout()
+        status.setContentsMargins(12, 8, 12, 4)
         self.status_dot = QLabel()
         self.status_dot.setObjectName("statusDot")
-        self.status_text = QLabel("연결 확인 중…")
-        top = QHBoxLayout()
-        top.addWidget(self.status_dot)
-        top.addWidget(self.status_text)
-        top.addStretch(1)
-        root.addLayout(top)
+        self.status_text = QLabel("연결 확인 중")
+        self.status_text.setObjectName("statusText")
+        status.addWidget(self.status_dot)
+        status.addWidget(self.status_text)
+        status.addStretch(1)
+        root.addLayout(status)
 
-        row = QHBoxLayout()
+        # 대화 영역(스크롤)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._chat_host = QWidget()
+        self._chat_host.setObjectName("chatHost")
+        self._chat_layout = QVBoxLayout(self._chat_host)
+        self._chat_layout.setContentsMargins(12, 8, 12, 8)
+        self._chat_layout.setSpacing(10)
+        self._scroll.setWidget(self._chat_host)
+        root.addWidget(self._scroll, 1)
+
+        # 입력 바(하단 고정) — 둥근 박스 안에 입력창 + 원형 보내기 버튼
+        bar = QFrame()
+        bar.setObjectName("inputBar")
+        hb = QHBoxLayout(bar)
+        hb.setContentsMargins(10, 4, 4, 4)
+        hb.setSpacing(4)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("질문을 입력하세요 (Enter)")
+        self.input.setObjectName("chatInput")
+        self.input.setPlaceholderText("메시지 입력…")
         self.input.returnPressed.connect(self._on_ask)
-        self.mode = QComboBox()
-        for label, _ in MODES:
-            self.mode.addItem(label)
-        self.ask_btn = QPushButton("질문")
-        self.ask_btn.setObjectName("askBtn")
-        self.ask_btn.clicked.connect(self._on_ask)
-        row.addWidget(self.input, 1)
-        row.addWidget(self.mode)
-        row.addWidget(self.ask_btn)
-        root.addLayout(row)
-
-        ex = QHBoxLayout()
-        ex.addWidget(QLabel("예시:"))
-        for text, m in EXAMPLES:
-            b = QPushButton(text)
-            b.setObjectName("exampleBtn")
-            b.clicked.connect(lambda _, t=text, mm=m: self._fill_example(t, mm))
-            ex.addWidget(b)
-        ex.addStretch(1)
-        root.addLayout(ex)
-
-        self.answer = QTextBrowser()
-        self.answer.setOpenExternalLinks(False)
-        root.addWidget(self.answer, 1)
-
-        root.addWidget(QLabel("출처"))
-        self.sources = QTextBrowser()
-        self.sources.setMaximumHeight(120)
-        self.sources.setOpenLinks(False)
-        self.sources.anchorClicked.connect(self._open_source)
-        root.addWidget(self.sources)
-
-        self.retry_btn = QPushButton("다시 시도")
-        self.retry_btn.clicked.connect(self._on_ask)
-        self.retry_btn.hide()
-        root.addWidget(self.retry_btn)
+        self.send_btn = QPushButton("↑")
+        self.send_btn.setObjectName("sendBtn")
+        self.send_btn.setFixedSize(32, 32)
+        self.send_btn.clicked.connect(self._on_ask)
+        hb.addWidget(self.input, 1)
+        hb.addWidget(self.send_btn)
+        wrap = QVBoxLayout()
+        wrap.setContentsMargins(12, 4, 12, 12)
+        wrap.addWidget(bar)
+        root.addLayout(wrap)
 
     def _apply_style(self):
         self.setStyleSheet(f"""
             QWidget#aiPanel {{ background: {S.BG_DARK}; }}
-            QLabel {{ color: {S.TEXT_SECONDARY}; font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE}; }}
-            QLineEdit, QComboBox, QTextBrowser {{
-                background: {S.BG_INPUT}; color: {S.TEXT_PRIMARY};
+            QWidget#chatHost {{ background: {S.BG_DARK}; }}
+            QScrollArea {{ background: {S.BG_DARK}; border: none; }}
+            QLabel#statusText {{ color: {S.TEXT_MUTED}; font-family: {S.FONT_FAMILY};
+                font-size: {S.FONT_SIZE_SMALL}; }}
+            QLabel#statusDot {{ min-width: 8px; max-width: 8px; min-height: 8px; max-height: 8px;
+                border-radius: 4px; background: {S.TEXT_MUTED}; }}
+            QLabel#emptyPrompt {{ color: {S.TEXT_MUTED}; font-family: {S.FONT_FAMILY};
+                font-size: {S.FONT_SIZE_BASE}; }}
+            QFrame#emptyIcon {{ border: 1px solid {S.BORDER}; border-radius: {S.BORDER_RADIUS_MD};
+                background: transparent; }}
+            QLabel#userBubble {{ background: {S.BG_HOVER}; color: {S.TEXT_PRIMARY};
+                font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE};
+                border-radius: {S.BORDER_RADIUS_LG}; border-top-right-radius: 2px;
+                padding: {S.SPACING_SM} {S.SPACING_MD}; }}
+            QLabel#answerBody {{ color: {S.TEXT_PRIMARY}; font-family: {S.FONT_FAMILY};
+                font-size: {S.FONT_SIZE_BASE}; padding: {S.SPACING_XS} 0; }}
+            QLabel#sourceLine {{ color: {S.TEXT_MUTED}; font-family: {S.FONT_FAMILY};
+                font-size: {S.FONT_SIZE_SMALL}; }}
+            QPushButton#exampleBtn {{ background: {S.BG_PANEL}; color: {S.TEXT_SECONDARY};
                 border: 1px solid {S.BORDER}; border-radius: {S.BORDER_RADIUS_MD};
-                padding: {S.SPACING_SM}; font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE};
-            }}
-            QLineEdit:focus {{ border: 1px solid {S.BORDER_FOCUS}; }}
-            QPushButton#askBtn {{
-                background: {S.ACCENT_TEAL}; color: {S.TEXT_INVERSE};
-                border: none; border-radius: {S.BORDER_RADIUS_MD};
-                padding: {S.SPACING_SM} {S.SPACING_LG}; min-height: {S.BUTTON_HEIGHT};
-                font-weight: {S.FONT_WEIGHT_BOLD};
-            }}
-            QPushButton#askBtn:disabled {{ background: {S.TEXT_MUTED}; }}
-            QPushButton#exampleBtn {{
-                background: {S.BG_PANEL}; color: {S.TEXT_SECONDARY};
-                border: 1px solid {S.BORDER}; border-radius: {S.BORDER_RADIUS_FULL};
-                padding: {S.SPACING_XS} {S.SPACING_MD}; font-size: {S.FONT_SIZE_SMALL};
-            }}
-            QLabel#statusDot {{ min-width: 10px; max-width: 10px; min-height: 10px; max-height: 10px;
-                border-radius: 5px; background: {S.TEXT_MUTED}; }}
+                padding: {S.SPACING_SM} {S.SPACING_MD}; font-family: {S.FONT_FAMILY};
+                font-size: {S.FONT_SIZE_SMALL}; text-align: left; }}
+            QPushButton#exampleBtn:hover {{ background: {S.BG_HOVER}; }}
+            QFrame#inputBar {{ background: {S.BG_INPUT}; border: 1px solid {S.BORDER};
+                border-radius: {S.BORDER_RADIUS_LG}; }}
+            QLineEdit#chatInput {{ background: transparent; border: none; color: {S.TEXT_PRIMARY};
+                font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE}; }}
+            QPushButton#sendBtn {{ background: {S.ACCENT_TEAL}; color: {S.TEXT_INVERSE};
+                border: none; border-radius: 16px; font-weight: {S.FONT_WEIGHT_BOLD};
+                font-size: {S.FONT_SIZE_LARGE}; }}
+            QPushButton#sendBtn:disabled {{ background: {S.TEXT_MUTED}; }}
         """)
 
     def _set_dot(self, color):
         self.status_dot.setStyleSheet(
-            f"min-width:10px;max-width:10px;min-height:10px;max-height:10px;border-radius:5px;background:{color};")
+            f"min-width:8px;max-width:8px;min-height:8px;max-height:8px;"
+            f"border-radius:4px;background:{color};")
 
-    def _fill_example(self, text, mode):
+    # ---- 대화 영역 관리 ----
+    def _clear_chat(self):
+        while self._chat_layout.count():
+            item = self._chat_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+    def _show_empty(self):
+        """첫 진입/대화 없음 — 가운데에 안내 + 예시 버튼."""
+        self._clear_chat()
+        self._has_messages = False
+        self._chat_layout.addStretch(1)
+
+        center = QWidget()
+        v = QVBoxLayout(center)
+        v.setSpacing(10)
+        icon_row = QHBoxLayout()
+        icon = QFrame()
+        icon.setObjectName("emptyIcon")
+        icon.setFixedSize(44, 44)
+        icon_row.addStretch(1)
+        icon_row.addWidget(icon)
+        icon_row.addStretch(1)
+        v.addLayout(icon_row)
+        prompt = QLabel("문헌·사용법을 물어보세요")
+        prompt.setObjectName("emptyPrompt")
+        prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(prompt)
+        for text in EXAMPLES:
+            b = QPushButton(text)
+            b.setObjectName("exampleBtn")
+            b.clicked.connect(lambda _=False, t=text: self._fill_and_send(t))
+            v.addWidget(b)
+        self._chat_layout.addWidget(center)
+        self._chat_layout.addStretch(1)
+
+    def _enter_message_mode(self):
+        self._clear_chat()
+        self._chat_layout.addStretch(1)  # 메시지를 위로 쌓기 위한 말단 stretch
+        self._has_messages = True
+
+    def _append(self, widget):
+        # 말단 stretch 바로 앞에 삽입(위→아래 누적).
+        self._chat_layout.insertWidget(self._chat_layout.count() - 1, widget)
+
+    def _add_user_bubble(self, text):
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        lab = QLabel(text)
+        lab.setObjectName("userBubble")
+        lab.setTextFormat(Qt.TextFormat.PlainText)
+        lab.setWordWrap(True)
+        lab.setMaximumWidth(280)
+        h.addStretch(1)
+        h.addWidget(lab)
+        self._append(row)
+
+    def _add_answer_block(self):
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(4)
+        body = QLabel("검색·답변 생성 중")
+        body.setObjectName("answerBody")
+        body.setTextFormat(Qt.TextFormat.PlainText)
+        body.setWordWrap(True)
+        src = QLabel("")
+        src.setObjectName("sourceLine")
+        src.setTextFormat(Qt.TextFormat.RichText)
+        src.setWordWrap(True)
+        src.setOpenExternalLinks(False)
+        src.linkActivated.connect(self._open_link)
+        src.hide()
+        v.addWidget(body)
+        v.addWidget(src)
+        self._append(box)
+        return body, src
+
+    def _scroll_bottom_later(self):
+        QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
+            self._scroll.verticalScrollBar().maximum()))
+
+    # ---- 동작 ----
+    def _fill_and_send(self, text):
         self.input.setText(text)
-        for i, (_, m) in enumerate(MODES):
-            if m == mode:
-                self.mode.setCurrentIndex(i)
+        self._on_ask()
 
     def _check_health(self):
-        self.status_text.setText("연결 확인 중…")
+        self.status_text.setText("연결 확인 중")
         self._health_worker = HealthWorker(self.base_url)
         self._health_worker.result.connect(self._on_health)
         self._health_worker.start()
@@ -185,23 +282,29 @@ class AiAssistantPanel(QWidget):
             self.status_text.setText("연결됨")
         else:
             self._set_dot(S.ACCENT_RED)
-            self.status_text.setText("연결 끊김 — serve.py가 켜져 있는지 확인하세요")
+            self.status_text.setText("연결 끊김 — serve.py 확인")
 
     def _on_ask(self):
         q = self.input.text().strip()
         if not q or (self._worker and self._worker.isRunning()):
             return
-        self.retry_btn.hide()
-        self.answer.clear()
-        self.sources.clear()
-        self.ask_btn.setEnabled(False)
-        self.ask_btn.setText("생성 중…")
+        if not self._has_messages:
+            self._enter_message_mode()
+        self._last_question = q
+        self.input.clear()
+        self._add_user_bubble(q)
+        self._pending_body, self._pending_src = self._add_answer_block()
+        self._set_busy(True)
         self._start_dots()
-        mode = MODES[self.mode.currentIndex()][1]
-        self._worker = AskWorker(self.base_url, q, mode)
+        self._scroll_bottom_later()
+        self._worker = AskWorker(self.base_url, q, "auto")
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
+
+    def _set_busy(self, busy):
+        self.input.setEnabled(not busy)
+        self.send_btn.setEnabled(not busy)
 
     def _start_dots(self):
         if getattr(self, "_timer", None):
@@ -214,42 +317,67 @@ class AiAssistantPanel(QWidget):
 
     def _tick(self):
         self._dots = (self._dots + 1) % 4
-        self.status_text.setText("검색·답변 생성 중" + "." * self._dots)
+        if self._pending_body is not None:
+            self._pending_body.setText("검색·답변 생성 중" + "." * self._dots)
 
-    def _stop_busy(self):
+    def _stop_dots(self):
         if getattr(self, "_timer", None):
             self._timer.stop()
-        self.ask_btn.setEnabled(True)
-        self.ask_btn.setText("질문")
-        self.status_text.setStyleSheet("")  # 이전 에러 빨강색 해제
 
     def _on_done(self, res):
         if self._closing:
             return
-        self._stop_busy()
+        self._stop_dots()
+        self._set_busy(False)
+        if res.get("error"):  # 방어적(서비스가 200으로 error 준 경우)
+            self._render_error(res["error"])
+            return
+        if self._pending_body is not None:
+            self._pending_body.setStyleSheet("")
+            self._pending_body.setText(res.get("answer", ""))
+        self._render_sources(res.get("sources", []))
         self.status_text.setText(f"완료 ({res.get('timings', {}).get('llm', '?')}s)")
-        self.answer.setPlainText(res.get("answer", ""))
+        self._scroll_bottom_later()
+
+    def _render_sources(self, sources):
+        if self._pending_src is None:
+            return
         lines = []
-        for i, s in enumerate(res.get("sources", []), 1):
+        for i, s in enumerate(sources, 1):
             url = doi_url(s.get("doi", ""))
             label = s.get("source", "?")
             if url:
-                lines.append(f'[{i}] <a href="{url}">{label}</a>')
+                lines.append(f'[{i}] <a href="{url}" style="color:{S.ACCENT_TEAL};">{label}</a>')
             else:
                 lines.append(f"[{i}] {label}")
-        self.sources.setHtml("<br>".join(lines) if lines else "(출처 없음)")
+        if lines:
+            self._pending_src.setText("출처 · " + "  ".join(lines))
+            self._pending_src.show()
 
     def _on_failed(self, msg):
         if self._closing:
             return
-        self._stop_busy()
-        self.status_text.setText(msg)
-        self.status_text.setStyleSheet(f"color: {S.ACCENT_RED};")
-        self.retry_btn.show()
+        self._stop_dots()
+        self._set_busy(False)
+        self._render_error(msg)
 
-    def _open_source(self, url: QUrl):
-        if url.toString():
-            QDesktopServices.openUrl(url)
+    def _render_error(self, msg):
+        if self._pending_body is not None:
+            self._pending_body.setStyleSheet(f"color: {S.ACCENT_RED};")
+            self._pending_body.setText(msg)
+        if self._pending_src is not None:
+            self._pending_src.setText('<a href="retry" style="color:%s;">다시 시도</a>' % S.ACCENT_TEAL)
+            self._pending_src.show()
+        self._scroll_bottom_later()
+
+    def _open_link(self, href):
+        if href == "retry":
+            if self._last_question:
+                self.input.setText(self._last_question)
+                self._on_ask()
+            return
+        if href:
+            QDesktopServices.openUrl(QUrl(href))
 
     def set_base_url(self, url):
         """설정창에서 URL 변경 시 호출 — 갱신 후 연결 상태 재확인."""
@@ -257,7 +385,8 @@ class AiAssistantPanel(QWidget):
         self._check_health()
 
     def shutdown(self):
-        """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지)."""
+        """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지).
+        패널은 dock에 임베드돼 자체 closeEvent를 못 받으므로 외부에서 호출한다."""
         self._closing = True
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
