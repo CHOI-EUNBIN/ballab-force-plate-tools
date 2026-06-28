@@ -10,9 +10,10 @@ icon_datas = [
     (os.path.join('assets', 'ballab_icon.icns'), 'assets'),
     (os.path.join('assets', 'ballab_icon_master_1024_transparent.png'), 'assets'),
 ]
-hiddenimports = ['pyqtgraph', 'pyqtgraph.graphicsItems.ViewBox.axisCtrlTemplate_pyqt6', 'pyqtgraph.graphicsItems.PlotItem.plotConfigTemplate_pyqt6', 'pyqtgraph.imageview.ImageViewTemplate_pyqt6', 'scipy.signal', 'scipy.fft', 'scipy.stats', 'scipy.linalg', 'qtm_rt', 'openpyxl']
+hiddenimports = ['pyqtgraph', 'pyqtgraph.graphicsItems.ViewBox.axisCtrlTemplate_pyqt6', 'pyqtgraph.graphicsItems.PlotItem.plotConfigTemplate_pyqt6', 'pyqtgraph.imageview.ImageViewTemplate_pyqt6', 'pyqtgraph.opengl', 'scipy.signal', 'scipy.fft', 'scipy.stats', 'scipy.linalg', 'qtm_rt', 'openpyxl']
 hiddenimports += collect_submodules('qtm_rt')
 hiddenimports += collect_submodules('pyqtgraph')
+hiddenimports += collect_submodules('OpenGL')
 
 
 a = Analysis(

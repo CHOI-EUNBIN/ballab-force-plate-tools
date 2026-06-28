@@ -68,7 +68,11 @@ def extract_epochs(values, windows, points=101):
         seg = v[i0:i1 + 1]
         if seg.size < 2:
             continue
+        # A window end past the array is silently clipped by the slice; report the
+        # REAL last index (i0 + seg.size - 1), not the requested i1, so downstream
+        # labels can't mismatch the actual data.
+        real_end = int(i0) + int(seg.size) - 1
         rows.append(resample_to_percent(seg, points))
-        meta.append({"start": int(i0), "end": int(i1)})
+        meta.append({"start": int(i0), "end": real_end})
     matrix = np.vstack(rows) if rows else np.empty((0, points))
     return matrix, meta

@@ -16,12 +16,16 @@ Catalogs:
 Empty pipeline => raw (no metrics/derived signals), exactly as before.
 """
 
+import logging
+
 import numpy as np
 
 from core import events_compute, signal_ops
 from core.metrics_compute import compute_metric_step
 from core.pipeline import ComputeStep, MetricStep, NormalizeStep, METRIC_PREFIX, EVENT_PREFIX
 from core.signals import Workspace, unit_for
+
+log = logging.getLogger(__name__)
 
 G = 9.80665  # m/s^2 — for body weight (N) from mass (kg)
 
@@ -143,6 +147,16 @@ def _run_compute(ctx, step):
                        unit=signal_ops.derive_unit(base_unit, "absval"))
         return
 
+    if method == "xcom":
+        # Extrapolated CoM (Hof 2005): input is a COM position axis; length_m is
+        # the inverted-pendulum length (COM height, metres). Missing/invalid
+        # length -> all-NaN (never a guessed pendulum length). Unit preserved.
+        length_m = params.get("length_m")
+        out = signal_ops.xcom(src, ctx.time, length_m=length_m)
+        ctx.add_signal(step.name, out,
+                       unit=signal_ops.derive_unit(base_unit, "xcom"))
+        return
+
     if method == "magnitude":
         comps = [src]
         try:
@@ -171,7 +185,12 @@ def _run_normalize(ctx, step):
         return None
     try:
         values = ctx.signal(step.input)
-    except Exception:
+    except (KeyError, ValueError) as e:
+        # Expected data failures (unresolvable / circular / unavailable signal —
+        # the Workspace raises ValueError) degrade gracefully to "no epochs".
+        # An unexpected error is a genuine bug and is left to propagate.
+        log.debug("normalize step %r: input %r unavailable (%s)",
+                  step.name, step.input, e)
         return None
     if values is None:
         return None

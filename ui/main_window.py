@@ -3,7 +3,8 @@ import sys
 
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QIcon, QAction, QActionGroup, QKeySequence
-from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QFileDialog, QMessageBox, QDockWidget
+from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QFileDialog, QMessageBox, QDockWidget, QMenuBar
+from ui.custom_titlebar import TitleBar, enable_frameless, handle_native_event
 from core.axis_settings import AxisSettings
 from core.project import save_project, load_project, PROJECT_FILTER, PROJECT_EXT
 from ui.collect_tab import CollectTab
@@ -20,6 +21,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Balancelab")
         self.setWindowIcon(QIcon(resource_path("assets/ballab_icon_master_1024_transparent.png")))
+        # Frameless: we draw our own single-row title bar (menu + window buttons).
+        # On Windows a native resizable frame + shadow is re-added in showEvent.
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self._frameless_ready = False
         self.resize(1340, 820)
         self.setMinimumSize(960, 620)
 
@@ -30,7 +35,7 @@ class MainWindow(QMainWindow):
         # Resolve the theme before building tabs so plots/labels build with the
         # right colours from the start.
         self._qsettings = QSettings("Balancelab", "Balancelab")
-        self._theme = self._qsettings.value("theme", "light") or "light"
+        self._theme = self._qsettings.value("theme", "dark") or "dark"
         self._palette = use_theme(self._theme)
 
         # Shared metrics interchange between Analyze and Statistics.
@@ -50,15 +55,47 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
         self.current_project_path = None
 
-        self._build_menubar()
+        menubar = self._build_menubar()
+        self.titlebar = TitleBar(
+            self, menubar,
+            resource_path("assets/ballab_icon_master_1024_transparent.png"))
+        self.setMenuWidget(self.titlebar)
         self._build_ai_dock()
         self.setStyleSheet(self._style())
         # The app starts from loading a C3D, so open on Analyze (Record stays
         # available in the nav).
         self._switch_view(self.analyze_tab)
+        # Style the custom title bar to the active theme.
+        self._apply_titlebar_theme()
+
+    def _apply_titlebar_theme(self):
+        """Restyle the custom one-row title bar to the active theme."""
+        if hasattr(self, "titlebar"):
+            self.titlebar.apply_theme(self._palette)
+            self.titlebar.sync_maximized()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Re-add the native frame (resize / Aero snap / shadow) once the native
+        # window exists. Windows only; a no-op elsewhere.
+        if not self._frameless_ready:
+            self._frameless_ready = True
+            enable_frameless(self)
+
+    def nativeEvent(self, eventType, message):
+        if eventType == "windows_generic_MSG":
+            result = handle_native_event(self, message)
+            if result is not None:
+                return result
+        return super().nativeEvent(eventType, message)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == event.Type.WindowStateChange and hasattr(self, "titlebar"):
+            self.titlebar.sync_maximized()
 
     def _build_menubar(self):
-        menubar = self.menuBar()
+        menubar = QMenuBar(self)
         self._view_group = QActionGroup(self)
         self._view_group.setExclusive(True)
 
@@ -159,6 +196,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(timenorm_help)
 
         self._update_menu_state()
+        return menubar
 
     def _build_ai_dock(self):
         """RAG AI 도우미 패널을 우측 QDockWidget으로 붙인다. 시작 시 숨김,
@@ -246,6 +284,7 @@ class MainWindow(QMainWindow):
         self._palette = use_theme(self._theme)
         self._qsettings.setValue("theme", self._theme)
         self.setStyleSheet(self._style())
+        self._apply_titlebar_theme()
         for tab in (self.collect_tab, self.analyze_tab, self.statistics_tab):
             if hasattr(tab, "apply_theme"):
                 tab.apply_theme()

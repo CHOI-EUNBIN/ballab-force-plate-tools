@@ -86,3 +86,9 @@ local_settings.py
 # OS files
 .DS_Store
 Thumbs.db
+
+# Large project/data binaries (not source)
+*.ballab
+
+# Superpowers SDD scratch
+.superpowers/

@@ -240,9 +240,12 @@ class DetectEventStep(PipelineStep):
       - ``label``  — the event name attached to every detected instance.
       - ``method`` — ``"threshold"`` | ``"peak"`` | ``"zero"`` | ``"frame"``.
       - ``params`` — method-specific knobs (a plain dict, persisted verbatim):
-          threshold: {threshold, direction(rising|falling), min_distance, hysteresis}
-          peak:      {kind(max|min), min_distance, prominence}
+          threshold: {threshold, direction(rising|falling), min_distance_s, hysteresis}
+          peak:      {kind(max|min), min_distance_s, prominence}
           zero:      {direction(both|up|down)}
+          (``min_distance_s`` is the refractory in SECONDS, converted to frames at
+          run time via the master clock; a legacy frame ``min_distance`` is still
+          read for back-compat — see ``events_compute._resolve_min_distance_frames``)
           frame:     {frame(0-based index)}  -- a single fixed-frame event; the
                      manual "fixed frame" pin unified into the pipeline. No signal
                      is read, so ``input``/``scope``/``selector`` are irrelevant
@@ -486,7 +489,8 @@ class MetricStep(PipelineStep):
 #: (kept for back-compat); the rest are the :mod:`core.signal_ops` building blocks.
 #: Each maps to a transform of one (or, for magnitude, several) input signals into
 #: a new derived signal. The UI's Add-step form offers these as the "Calculation".
-COMPUTE_METHODS = ("normalize", "derivative", "integral", "magnitude", "abs")
+COMPUTE_METHODS = ("normalize", "derivative", "integral", "magnitude", "abs",
+                   "xcom")
 
 
 class ComputeStep(PipelineStep):

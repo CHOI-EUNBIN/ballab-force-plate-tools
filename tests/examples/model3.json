@@ -1,0 +1,156 @@
+{
+  "name": "",
+  "joints": [
+    {
+      "asis_l": "LASIS",
+      "asis_r": "RASIS",
+      "cluster": [
+        "LASIS",
+        "RASIS",
+        "LPSIS",
+        "RPSIS"
+      ],
+      "method": "hip",
+      "name": "R_HIP",
+      "psis_l": "LPSIS",
+      "psis_r": "RPSIS",
+      "side": "R"
+    },
+    {
+      "asis_l": "LASIS",
+      "asis_r": "RASIS",
+      "cluster": [
+        "LASIS",
+        "RASIS",
+        "LPSIS",
+        "RPSIS"
+      ],
+      "method": "hip",
+      "name": "L_HIP",
+      "psis_l": "LPSIS",
+      "psis_r": "RPSIS",
+      "side": "L"
+    },
+    {
+      "name": "R_KNEE",
+      "method": "midpoint",
+      "medial": "RMKNEE",
+      "lateral": "RLKNEE",
+      "cluster": [
+        "RTHIGH_F",
+        "RTHIGH_B",
+        "RSHANK_F",
+        "RSHANK_B",
+        "RLKNEE"
+      ]
+    },
+    {
+      "name": "R_ANKLE",
+      "method": "midpoint",
+      "medial": "RMANK",
+      "lateral": "RLANK",
+      "cluster": [
+        "RTHIGH_F",
+        "RTHIGH_B",
+        "RSHANK_F",
+        "RSHANK_B",
+        "RLANK"
+      ]
+    },
+    {
+      "name": "L_KNEE",
+      "method": "midpoint",
+      "medial": "LMKNEE",
+      "lateral": "LLKNEE",
+      "cluster": [
+        "LTHIGH_F",
+        "LTHIGH_B",
+        "LSHANK_F",
+        "LSHANK_B",
+        "LLKNEE"
+      ]
+    },
+    {
+      "name": "L_ANKLE",
+      "method": "midpoint",
+      "medial": "LMANK",
+      "lateral": "LLANK",
+      "cluster": [
+        "LTHIGH_F",
+        "LTHIGH_B",
+        "LSHANK_F",
+        "LSHANK_B",
+        "LLANK"
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "name": "PELVIS",
+      "proximal": "PELVIS_POST",
+      "distal": "PELVIS_ANT"
+    },
+    {
+      "name": "R_THIGH",
+      "proximal": "R_HIP",
+      "distal": "R_KNEE"
+    },
+    {
+      "name": "R_SHANK",
+      "proximal": "R_KNEE",
+      "distal": "R_ANKLE"
+    },
+    {
+      "name": "R_FOOT",
+      "proximal": "RHEEL",
+      "distal": "RTOE"
+    },
+    {
+      "name": "L_THIGH",
+      "proximal": "L_HIP",
+      "distal": "L_KNEE"
+    },
+    {
+      "name": "L_SHANK",
+      "proximal": "L_KNEE",
+      "distal": "L_ANKLE"
+    },
+    {
+      "name": "L_FOOT",
+      "proximal": "LHEEL",
+      "distal": "LTOE"
+    }
+  ],
+  "angles": [
+    {
+      "name": "R_HIP_angle",
+      "segment_a": "PELVIS",
+      "segment_b": "R_THIGH"
+    },
+    {
+      "name": "R_KNEE_angle",
+      "segment_a": "R_THIGH",
+      "segment_b": "R_SHANK"
+    },
+    {
+      "name": "R_ANKLE_angle",
+      "segment_a": "R_SHANK",
+      "segment_b": "R_FOOT"
+    },
+    {
+      "name": "L_HIP_angle",
+      "segment_a": "PELVIS",
+      "segment_b": "L_THIGH"
+    },
+    {
+      "name": "L_KNEE_angle",
+      "segment_a": "L_THIGH",
+      "segment_b": "L_SHANK"
+    },
+    {
+      "name": "L_ANKLE_angle",
+      "segment_a": "L_SHANK",
+      "segment_b": "L_FOOT"
+    }
+  ]
+}

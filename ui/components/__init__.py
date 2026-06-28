@@ -1,11 +1,30 @@
-from .card import CardWidget
 from .metric_card import MetricCardWidget
-from .status_badge import StatusBadgeWidget
 from .empty_state import EmptyStateWidget
+from .wheel_guard import install_wheel_guard, guard_widget
+from .cascading_signal_picker import CascadingSignalPicker
+from .help_hint import (
+    HelpHint, SectionHintPopup, HintGroupBox,
+    section_header_with_hint, attach_group_hint,
+    label_with_hint, hint, section_hint, op_hint, metric_hint,
+    HINTS, SECTION_HINTS,
+)
 
 __all__ = [
-    "CardWidget",
     "MetricCardWidget",
-    "StatusBadgeWidget",
     "EmptyStateWidget",
+    "install_wheel_guard",
+    "guard_widget",
+    "CascadingSignalPicker",
+    "HelpHint",
+    "SectionHintPopup",
+    "HintGroupBox",
+    "section_header_with_hint",
+    "attach_group_hint",
+    "label_with_hint",
+    "hint",
+    "section_hint",
+    "op_hint",
+    "metric_hint",
+    "HINTS",
+    "SECTION_HINTS",
 ]

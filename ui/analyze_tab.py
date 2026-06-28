@@ -12,7 +12,7 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 from PyQt6.QtGui import (
     QPainter, QColor, QBrush, QPen, QKeySequence, QShortcut, QAction, QIcon,
-    QDrag, QCursor, QPixmap,
+    QDrag, QCursor, QPixmap, QActionGroup,
 )
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame,
@@ -36,7 +36,8 @@ from core.metrics import (
     compute_ellipse_points,
 )
 from core.c3d_reader import read_c3d, build_grf
-from core.data_quality import clean_dataset, clean_markers, summarize_reports
+from core.data_quality import (any_markers_missing, clean_dataset, clean_markers,
+                               summarize_marker_reports, summarize_reports)
 from ui.help_dialog import METRIC_TOOLTIPS
 from ui.style import (
     ACCENT_TEAL, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -291,6 +292,9 @@ class AnalyzeTab(QWidget):
         self._signal_groups = {}
         self._next_group_id = 1           # monotonic allocator for figure-group ids
         self._show_traj = False           # COP-path (2-D trajectory) view toggle
+        self._show_ensemble = False       # ensemble (%-cycle) curve in the MAIN graph area
+        self._ensemble_weight = "cycle"   # ensemble pooling: "cycle" | "subject"
+        self._in_layout_rebuild = False    # guard: blocks recursive _rebuild_plot_layout
         self._show_ellipse = True         # draw the 95% ellipse on the COP path (graph on/off)
         self._show_traj_events = True      # draw event points on the COP path (graph on/off)
         # RESULTS·Signals groups the user has collapsed (foldable sub-toggle). The
@@ -756,11 +760,15 @@ class AnalyzeTab(QWidget):
             self.metrics_list, "analyze/metrics_list_height", 90)
         ri.addWidget(self._make_section("Metrics", met_holder, expanded=True, sub=True))
 
-        # -- Ensemble panel (cross-trial mean +/- SD after a NormalizeStep run) -
+        # -- Ensemble pooling/export helper (NOT shown) -------------------------
+        # The ensemble lives entirely on the RESULTS·Signals "Ensemble overlay"
+        # row: View-as-graph draws the mean±SD in the MAIN area, and its
+        # right-click menu carries the weighting choice + Export CSV (see
+        # _ensemble_menu). This plot-less panel is kept only as the headless
+        # pool/stats/export facility those features call — it has no visible
+        # section of its own (no duplicate panel, no stray button).
         from ui.ensemble_panel import EnsemblePanel
-        self._ensemble_panel = EnsemblePanel()
-        ri.addWidget(self._make_section("Ensemble", self._ensemble_panel,
-                                        expanded=False, sub=True))
+        self._ensemble_panel = EnsemblePanel(show_plot=False)
 
         sec_results = self._make_section("RESULTS", results_inner, expanded=False)
         self._refresh_results_panels()
@@ -792,6 +800,18 @@ class AnalyzeTab(QWidget):
         item.setFlags(Qt.ItemFlag.NoItemFlags)
         item.setForeground(QBrush(QColor(TEXT_MUTED)))
         lst.addItem(item)
+
+    def _add_empty_hint(self, lst, text):
+        """A muted, non-selectable hint row shown when a RESULTS list is empty, so
+        the panel reads as "nothing here yet — do X" rather than a blank box.
+        Tagged ``("hint", None)`` so the right-click menus (which need a real
+        ``(kind, key)``) simply ignore it."""
+        item = QListWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)   # visible but not selectable
+        item.setForeground(QBrush(QColor(TEXT_MUTED)))
+        item.setData(Qt.ItemDataRole.UserRole, ("hint", None))
+        lst.addItem(item)
+        return item
 
     def _add_result_item(self, lst, entry, *, indent=False, suffix=""):
         """Add one ResultEntry row; stores ``(kind, key)`` on UserRole. A
@@ -1406,6 +1426,13 @@ class AnalyzeTab(QWidget):
         pipeline → empty list (the correct "nothing computed yet" state)."""
         self.signals_list.clear()
         if not entries:
+            # Empty recipe: a clear "do this next" hint instead of a blank box.
+            # The ensemble row is still appended (it self-skips without a
+            # NormalizeStep), so an ensemble-only recipe still shows its overlay.
+            self._add_empty_hint(
+                self.signals_list,
+                "No signals yet — add a step (+) to compute them.")
+            self._append_ensemble_signal_row()
             return
         rel = self._angle_reliability(dataset) if dataset else {}
         # Group, preserving catalog order.
@@ -1439,6 +1466,30 @@ class AnalyzeTab(QWidget):
                         item.setText(item.text() + "   ⚠")
                         item.setForeground(QBrush(QColor(TEXT_MUTED)))
                         item.setToolTip(self._low_confidence_tooltip(info))
+        self._append_ensemble_signal_row()
+
+    def _append_ensemble_signal_row(self):
+        """Append a right-click-able 'Ensemble overlay' row to RESULTS·Signals when
+        an enabled NormalizeStep exists, so the user can View-as-graph the
+        cross-trial mean±SD curve into the main area like any signal. Labelled
+        "Ensemble overlay" to disambiguate from the "Ensemble" data/export panel."""
+        if self.pipeline is None or not hasattr(self, "signals_list"):
+            return
+        from core.pipeline import NormalizeStep
+        from core.results_model import ResultEntry
+        norm = next((s for s in self.pipeline.steps
+                     if isinstance(s, NormalizeStep) and getattr(s, "enabled", True)
+                     and s.name), None)
+        if norm is None:
+            return
+        key = f"ensemble:{norm.name}"
+        # Logical group stays "Ensemble" (fold-state key); displayed label is
+        # "Ensemble overlay" to disambiguate from the "Ensemble" data/export panel.
+        self._add_sig_group_header(self.signals_list, "Ensemble", "▾ Ensemble overlay")
+        ent = ResultEntry(key, f"{norm.name} (mean ± SD)", "", "signal",
+                          "Ensemble overlay", "ensemble")
+        suffix = "   ●" if self._is_signal_graphed(key) else ""
+        self._add_result_item(self.signals_list, ent, suffix=suffix)
 
     def _add_sig_group_header(self, lst, group, label):
         """A foldable group header row in RESULTS·Signals.
@@ -1471,30 +1522,61 @@ class AnalyzeTab(QWidget):
 
     def _populate_events_list(self, entries):
         self.results_events_list.clear()
+        shown = 0
         for e in entries:
             label = e.key.split(":", 1)[1] if e.key.startswith("event:") else e.key
             if label in self._hidden_event_labels:
                 continue
             self._add_result_item(self.results_events_list, e)
+            shown += 1
+        if shown == 0:
+            self._add_empty_hint(
+                self.results_events_list,
+                "No events — add a Detect Events step (+).")
 
     def _populate_metrics_list(self, entries):
         self.metrics_list.clear()
         if not entries:
+            # Distinguish "no Metric step authored" from "authored but not run yet".
+            has_metric_step = bool(
+                self.pipeline is not None
+                and any(getattr(s, "kind", "") == "metric"
+                        for s in self.pipeline.steps))
+            self._add_empty_hint(
+                self.metrics_list,
+                "Add a Metric step, then ▶ Run." if not has_metric_step
+                else "Press ▶ Run to compute metrics.")
             return
+        from core import diagnostics as diag
         run = self._last_run_result or {}
         by_name = {m.get("name"): m for m in run.get("metrics", [])}
         for e in entries:
             name = e.key.split(":", 1)[1] if e.key.startswith("metric:") else e.key
             m = by_name.get(name)
             suffix = ""
+            status, message = diag.OK, ""
             if m is not None:
                 val = m.get("value")
                 if val is not None and np.isfinite(val):
                     suffix = f"   {val:.3g}" + (f" {e.unit}" if e.unit else "")
                 if m.get("n", 1) and m.get("n") > 1:
                     suffix += f"   (n={m['n']})"
+                status = m.get("status", diag.OK)
+                message = m.get("message", "") or ""
+            # Inline failure-feedback marker (mirrors the angle ⚠ tooltip pattern):
+            # ⚠ = value unavailable (NaN), ◐ = partial (some cycles / whole-trial
+            # fallback). The reason message rides in the tooltip; the row text stays
+            # scannable. An OK metric gets no marker.
+            if status == diag.UNAVAILABLE:
+                suffix += "   ⚠"
+            elif status == diag.PARTIAL:
+                suffix += "   ◐"
             item = self._add_result_item(self.metrics_list, e, suffix=suffix)
             item.setData(Qt.ItemDataRole.UserRole, ("metric", name))
+            if message:
+                item.setToolTip(message)
+            if status == diag.UNAVAILABLE:
+                item.setForeground(QBrush(QColor(TEXT_MUTED)))
 
     def _refresh_ensemble_panel(self):
         """Update the EnsemblePanel with normalized epoch data from all checked
@@ -1514,7 +1596,7 @@ class AnalyzeTab(QWidget):
              if isinstance(s, NormalizeStep) and getattr(s, "enabled", True)),
             None)
         if norm_step is None or not norm_step.name:
-            panel.set_sources([])
+            panel.set_sources([], title="Ensemble (% cycle)")
             return
         norm_name = norm_step.name
         sources = []
@@ -1526,15 +1608,98 @@ class AnalyzeTab(QWidget):
             normalized = run.get("normalized", {})
             nd = normalized.get(norm_name)
             if nd is not None:
-                sources.append((ds.get("name", f"trial_{i}"), nd))
+                # Carry the subject identity (folder tuple) so subject-weighted
+                # pooling can give each subject one vote regardless of cycle count.
+                subject = tuple(ds.get("folder", ())) or ds.get("name", f"trial_{i}")
+                sources.append((ds.get("name", f"trial_{i}"), nd, subject))
         # Show the step name in the panel title so it's clear which NormalizeStep
         # is being displayed (avoids silent "first step only" confusion).
         signal_key = getattr(norm_step, "input", "") or ""
         panel_title = f"Ensemble — {signal_key} [{norm_name}]" if signal_key else f"Ensemble — [{norm_name}]"
-        panel.set_sources(sources, title=panel_title)
+        panel.set_sources(sources, title=panel_title, mode=self._ensemble_weight)
+        # Keep the MAIN-area ensemble graph (if shown) in step with fresh data.
+        if getattr(self, "_show_ensemble", False) and not getattr(self, "_in_layout_rebuild", False):
+            self._rebuild_plot_layout()
+
+    def _set_ensemble_view(self, on):
+        """Show/hide the ensemble (%-cycle) mean±SD curve as a LARGE graph in the
+        main plot area. Driven by RESULTS·Signals right-click → View as graph on the
+        ``Ensemble`` row, so it isn't cramped in the narrow sidebar."""
+        self._show_ensemble = bool(on)
+        self._rebuild_plot_layout()
+
+    def _ensemble_menu(self, key):
+        """The right-click menu for the 'Ensemble overlay' row — all ensemble
+        controls in one place: View-as-graph, the per-cycle / per-subject
+        weighting (a checkable radio), and Export CSV. Consolidated here so the
+        ensemble behaves like every other RESULTS·Signals row (no stray panel)."""
+        menu = QMenu(self)
+        if self._show_ensemble:
+            menu.addAction("Remove from view", lambda: self._set_ensemble_view(False))
+        else:
+            menu.addAction("View as graph", lambda: self._set_ensemble_view(True))
+        menu.addSeparator()
+        avg = menu.addMenu("Average")
+        grp = QActionGroup(menu)
+        grp.setExclusive(True)
+        for label, mode in (("per cycle", "cycle"), ("per subject", "subject")):
+            act = avg.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(self._ensemble_weight == mode)
+            grp.addAction(act)
+            act.triggered.connect(
+                lambda _checked=False, m=mode: self._set_ensemble_weight(m))
+        menu.addSeparator()
+        menu.addAction("Export CSV…", self._export_ensemble_csv)
+        return menu
+
+    def _set_ensemble_weight(self, mode):
+        """Set the ensemble pooling weight ('cycle' | 'subject') and re-pool.
+
+        per cycle = every gait cycle weighted equally; per subject = each subject
+        averaged to one representative curve first, then averaged across subjects
+        (each subject one vote — removes cycle-count imbalance). See the Help.
+        """
+        self._ensemble_weight = mode if mode in ("cycle", "subject") else "cycle"
+        self._refresh_ensemble_panel()
+
+    def _export_ensemble_csv(self):
+        """Export the pooled ensemble (current weighting) as CSV — moved off the
+        old panel onto the overlay's right-click menu."""
+        panel = getattr(self, "_ensemble_panel", None)
+        if panel is not None:
+            panel._on_export()
+
+    def _build_ensemble_plot(self):
+        """A PlotWidget of the current ensemble mean ±SD over 0–100% cycle, for the
+        MAIN graph area. Reuses the pooled stats already computed for the sidebar
+        panel; returns None when there are no epochs."""
+        panel = getattr(self, "_ensemble_panel", None)
+        if panel is None or panel.n_epochs() <= 0:
+            return None
+        s = panel.stats()
+        x, mean, sd = s.get("x"), s.get("mean"), s.get("sd")
+        if x is None or len(x) == 0:
+            return None
+        base = panel._title.text() if hasattr(panel, "_title") else "Ensemble (% cycle)"
+        # Mode-aware count moves into the title (the old panel's count label is gone):
+        # e.g. "Ensemble — angle:Knee [knee_cycle]  ·  3 subjects (200 cycles)".
+        count = panel.count_label() if hasattr(panel, "count_label") else ""
+        title = f"{base}  ·  {count}" if count else base
+        plot = self._new_plot_widget(title, key="ensemble", is_time_plot=False)
+        plot.setLabel("bottom", "% cycle", color=GRAPH_FG, size="9pt")
+        lo = plot.plot(pen=pg.mkPen(None))
+        hi = plot.plot(pen=pg.mkPen(None))
+        lo.setData(x, mean - sd)
+        hi.setData(x, mean + sd)
+        plot.addItem(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(59, 143, 217, 60)))
+        plot.plot(x, mean, pen=pg.mkPen("#3B8FD9", width=2))
+        return plot
 
     # -- which signals are currently graphed (for the ● tag) ---------------
     def _is_signal_graphed(self, key):
+        if key.startswith("ensemble:"):
+            return bool(self._show_ensemble)
         if key.startswith("angle:"):
             return key.split(":", 1)[1] in self._angle_plots
         if key.startswith("trajectory:"):
@@ -1549,9 +1714,17 @@ class AnalyzeTab(QWidget):
         if item is None:
             return
         data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
+        # Skip non-data rows: group headers ("group") and empty-state hints
+        # ("hint") carry no real (kind, key) to act on.
+        if not data or data[0] in ("group", "hint") or data[1] is None:
             return
         _kind, key = data
+        if key.startswith("ensemble:"):
+            # Cross-trial ensemble: all its controls live in one right-click menu
+            # (view, weighting, export) — consistent with every other signal row.
+            self._ensemble_menu(key).exec(
+                self.signals_list.viewport().mapToGlobal(pos))
+            return
         menu = QMenu(self)
         graphed = self._is_signal_graphed(key)
         if key.startswith("angle:"):
@@ -1629,7 +1802,7 @@ class AnalyzeTab(QWidget):
         if item is None:
             return
         data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
+        if not data or data[0] == "hint" or data[1] is None:
             return
         _kind, key = data
         label = key.split(":", 1)[1] if key.startswith("event:") else key
@@ -1647,7 +1820,7 @@ class AnalyzeTab(QWidget):
         if item is None:
             return
         data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
+        if not data or data[0] == "hint" or data[1] is None:
             return
         _kind, name = data
         menu = QMenu(self)
@@ -2821,9 +2994,12 @@ class AnalyzeTab(QWidget):
         and the parameter summary below (Visual3D-style 2-line rows). Human signal
         names only (``label_for``), never raw catalog keys."""
         from core.pipeline import (FilterStep, DetectEventStep, TrajectoryStep,
-                                    MetricStep, ComputeStep, ComputeAngleStep)
+                                    MetricStep, ComputeStep, ComputeAngleStep,
+                                    NormalizeStep)
         if isinstance(step, ComputeAngleStep):
             return "Joint angles"
+        if isinstance(step, NormalizeStep):
+            return step.name or "(unnamed normalize)"
         if isinstance(step, TrajectoryStep):
             return "COP trajectory"
         if isinstance(step, MetricStep):
@@ -2848,10 +3024,20 @@ class AnalyzeTab(QWidget):
         ``"Fz threshold ↑ 20 N"`` for a detect step. Empty string => no second
         line is drawn. Human signal names only."""
         from core.pipeline import (FilterStep, DetectEventStep, TrajectoryStep,
-                                    MetricStep, ComputeStep, ComputeAngleStep)
+                                    MetricStep, ComputeStep, ComputeAngleStep,
+                                    NormalizeStep)
         if isinstance(step, ComputeAngleStep):
             n = len(step.joints)
             return f"from kinematic model · {n} angles" if n else "from kinematic model"
+        if isinstance(step, NormalizeStep):
+            sig = label_for(step.input) if step.input else "(signal)"
+            if step.mode == "cycle":
+                span = f"per cycle of {step.event or '(event)'}"
+            elif step.mode == "window":
+                span = f"{step.start_event or '(start)'}→{step.end_event or '(end)'}"
+            else:
+                span = "whole trial"
+            return f"{sig} · {span} · {step.points} pts"
         if isinstance(step, TrajectoryStep):
             return f"{label_for(step.ml)} (ML) × {label_for(step.ap)} (AP)"
         if isinstance(step, MetricStep):
@@ -2938,6 +3124,11 @@ class AnalyzeTab(QWidget):
     def _append_step(self, kind, vals):
         """Build + append the pipeline step for ``(kind, form values)`` from the
         unified Add dialog, reusing the same validation/wiring as before."""
+        # Preset kinds are dispatched to _apply_preset (strips the "preset_" prefix).
+        # _apply_preset already seeds + refreshes; nothing else needed here.
+        if kind.startswith("preset_"):
+            self._apply_preset(kind[len("preset_"):])
+            return
         from core.pipeline import (FilterStep, DetectEventStep, TrajectoryStep,
                                     MetricStep, ComputeAngleStep, ComputeStep)
         if kind == "filter":
@@ -3030,9 +3221,11 @@ class AnalyzeTab(QWidget):
         if dataset is not None:
             self._ensure_model_result(dataset)  # so angle inputs are offered
         frame_max = (len(dataset["time"]) - 1) if dataset is not None else 0
+        master_fs = float(dataset.get("fs") or 1000.0) if dataset is not None else 1000.0
         dialog = DetectEventStepDialog(self, self._event_input_options(),
                                        frame_max=frame_max, color=self.event_color,
-                                       event_labels=self._event_label_options())
+                                       event_labels=self._event_label_options(),
+                                       master_fs=master_fs)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         inp, label, method, params, selector, scope, color = dialog.values()
@@ -3048,6 +3241,19 @@ class AnalyzeTab(QWidget):
         self.pipeline.add(DetectEventStep(input=inp, label=label, method=method,
                                           params=params, selector=selector,
                                           scope=scope, color=color))
+        self._invalidate_event_caches()
+        self._refresh_pipeline_list()
+        self._refresh_event_controls(self._current_dataset())
+        self._on_filter_changed()
+
+    def _apply_preset(self, name):
+        """Seed the pipeline with a task preset's steps (core.presets), then
+        refresh exactly like a manual add-step.  The seeded steps are normal,
+        fully editable pipeline steps."""
+        from core.presets import build_preset
+        dataset = self._current_dataset()
+        for step in build_preset(name, dataset or {}):
+            self.pipeline.add(step)
         self._invalidate_event_caches()
         self._refresh_pipeline_list()
         self._refresh_event_controls(self._current_dataset())
@@ -3199,8 +3405,14 @@ class AnalyzeTab(QWidget):
             self._ensure_model_result(dataset)   # so angle inputs are offered
         # A compute step can't reference its own (not-yet-produced) name; the
         # normalize-by-metric list is the pipeline's defined metrics anyway.
+        # Suggest an XCOM pendulum length from the subject's height (hint only —
+        # the dialog never auto-fills it; the user may enter a marker-measured L).
+        from ui.analyze_dialogs import suggested_pendulum_length_m
+        sugg_L = suggested_pendulum_length_m(
+            self._subject_metrics(dataset).get("height") if dataset else None)
         dialog = ComputeStepDialog(self, self._event_input_options(), step=step,
-                                   metric_refs=self._metric_ref_options())
+                                   metric_refs=self._metric_ref_options(),
+                                   suggested_length_m=sugg_L)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         vals = dialog.values()
@@ -3453,10 +3665,12 @@ class AnalyzeTab(QWidget):
         # label — drop this step's own label so it can't reference itself.
         own = getattr(step, "label", "")
         event_labels = [lab for lab in self._event_label_options() if lab != own]
+        master_fs = float(dataset.get("fs") or 1000.0) if dataset is not None else 1000.0
         dialog = DetectEventStepDialog(self, self._event_input_options(),
                                        frame_max=frame_max, step=step,
                                        color=self.event_color,
-                                       event_labels=event_labels)
+                                       event_labels=event_labels,
+                                       master_fs=master_fs)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         inp, label, method, params, selector, scope, color = dialog.values()
@@ -3574,7 +3788,11 @@ class AnalyzeTab(QWidget):
             if self.c_events is not None:
                 self.c_events.setData([])
             return
-        ws = Workspace(dataset, marker_disp=None,
+        # Pass marker_disp so a TrajectoryStep reading a marker-derived input
+        # resolves too (mirrors the _render_force_curves fix); harmless for the
+        # usual force-derived COP path.
+        ws = Workspace(dataset,
+                       marker_disp=self._marker_display_data(dataset.get("markers")),
                        angle_result=self._angle_result_for(dataset),
                        pipeline=self.pipeline,
                        metrics=self._subject_metrics(dataset))
@@ -3789,13 +4007,16 @@ class AnalyzeTab(QWidget):
         # COP-path (2-D trajectory) view has no checkbox either — driven by the
         # RESULTS·Signals "COP path" right-click.
         self.panel_visible["traj"] = bool(self._show_traj)
+        self.panel_visible["ensemble"] = bool(self._show_ensemble)
         # Joint angles never auto-graph: model_result is computed (metrics need it)
         # but the angle curves appear ONLY when chosen in RESULTS·Signals
         # (right-click → View as graph), tracked in self._angle_plots below.
         self._ensure_model_result(self._current_dataset())
         self._ensure_main_split()
         # Batch the rebuild so toggling a data graph doesn't visibly blank the
-        # whole panel (clear + refill repaints once).
+        # whole panel (clear + refill repaints once). The guard stops the nested
+        # _refresh_ensemble_panel (called below) from recursively rebuilding.
+        self._in_layout_rebuild = True
         self.plot_container.setUpdatesEnabled(False)
         self._clear_graph_host()
         self._reset_plot_handles()
@@ -3860,8 +4081,9 @@ class AnalyzeTab(QWidget):
             self._apply_inner_split_sizes(time_stack, time_sig, [1000] * len(time_plots))
 
         traj = self._build_traj_plot() if has_traj else None
+        ensemble = self._build_ensemble_plot() if self._show_ensemble else None
 
-        self._place_graph_parts(traj, time_stack)
+        self._place_graph_parts(traj, time_stack, ensemble)
         self._update_marker_view_for_rebuild(dataset, show_markers)
 
         if dataset is not None:
@@ -3877,6 +4099,7 @@ class AnalyzeTab(QWidget):
                 self.marker_view.update_frame(float(cur))
 
         self.plot_container.setUpdatesEnabled(True)
+        self._in_layout_rebuild = False
 
     def _reset_plot_handles(self):
         """Drop all plot/curve references so a rebuild starts from a clean slate.
@@ -3898,14 +4121,16 @@ class AnalyzeTab(QWidget):
         self.review_cursor_lines = []
         self.event_lines = []
 
-    def _place_graph_parts(self, traj, time_stack):
-        """Place the trajectory plot and/or time-series stack into the persistent
-        graph host (the side opposite the 3D view). The 3D view is never
-        reparented — it keeps its GL context, so toggling graphs no longer
-        flickers it black."""
+    def _place_graph_parts(self, traj, time_stack, ensemble=None):
+        """Place the trajectory plot, ensemble (%-cycle) plot and/or time-series
+        stack into the persistent graph host (the side opposite the 3D view). The
+        3D view is never reparented — it keeps its GL context, so toggling graphs
+        no longer flickers it black."""
         graph_parts = []
         if traj is not None:
             graph_parts.append(traj)
+        if ensemble is not None:
+            graph_parts.append(ensemble)
         if time_stack is not None:
             graph_parts.append(time_stack)
         if len(graph_parts) == 1:
@@ -3917,7 +4142,8 @@ class AnalyzeTab(QWidget):
             gsplit.setHandleWidth(6)
             for w in graph_parts:
                 gsplit.addWidget(w)
-            graph_sig = ("graph", traj is not None, time_stack is not None)
+            graph_sig = ("graph", traj is not None, ensemble is not None,
+                         time_stack is not None)
             self._apply_inner_split_sizes(
                 gsplit, graph_sig, [360] + [940] * (len(graph_parts) - 1))
             self._graph_host_layout.addWidget(gsplit)
@@ -4023,6 +4249,7 @@ class AnalyzeTab(QWidget):
         loaded = 0
         errors = []
         reports = []
+        marker_reports = []
         for task in tasks:
             path = task[0]
             folder = tuple(task[1]) if len(task) > 1 and task[1] else ()
@@ -4033,6 +4260,8 @@ class AnalyzeTab(QWidget):
                 dataset["_checked"] = True
                 self.datasets.append(dataset)
                 reports.append((dataset["name"], dataset.get("_clean_report", {})))
+                if dataset.get("_marker_report"):
+                    marker_reports.append((dataset["name"], dataset["_marker_report"]))
                 loaded += 1
             except Exception as exc:
                 errors.append(f"{os.path.basename(path)}: {exc}")
@@ -4048,12 +4277,22 @@ class AnalyzeTab(QWidget):
         self._set_file_count()
         if errors:
             QMessageBox.warning(self, "Load errors", "\n".join(errors[:8]))
-        elif loaded:
-            note = summarize_reports(reports)
+        if loaded:
+            # Surface data-quality findings: force-signal trim/fill, marker gaps,
+            # and — escalated to a WARNING — any fully-missing marker, which
+            # otherwise silently breaks joint angles for the affected segment.
+            extras = [n for n in (summarize_reports(reports),
+                                  summarize_marker_reports(marker_reports)) if n]
             msg = f"Loaded {loaded} file(s)."
-            if note:
-                msg += "\n\n" + note
-            QMessageBox.information(self, "Loaded", msg)
+            if extras:
+                msg += "\n\n" + "\n\n".join(extras)
+            if any_markers_missing(marker_reports):
+                msg += ("\n\nWarning: some markers are absent for the whole trial — "
+                        "joint angles / segments that need them will be unavailable "
+                        "until those markers are present.")
+                QMessageBox.warning(self, "Loaded with incomplete marker data", msg)
+            else:
+                QMessageBox.information(self, "Loaded", msg)
 
     def _clear_all_files(self):
         if not self.datasets:
@@ -4085,6 +4324,9 @@ class AnalyzeTab(QWidget):
         self._clear_event_lines()
         self._set_placeholder("Load files and run analysis")
         self._rebuild_plot_layout()
+        # Clear the cross-trial ensemble panel too: with no datasets/checked files
+        # it must not keep showing the previous project's pooled curve.
+        self._refresh_ensemble_panel()
 
     # ----- Project (.ballab) integration -----
     project_kind = "analyze"
@@ -4101,6 +4343,7 @@ class AnalyzeTab(QWidget):
         self._angle_plots = {}
         self._next_group_id = 1
         self._show_traj = False
+        self._show_ensemble = False
         self._clear_analysis()
         self._refresh_pipeline_list()
 
@@ -4614,13 +4857,26 @@ class AnalyzeTab(QWidget):
         if not rows:
             raise ValueError("empty CSV")
 
+        # Validate the required columns up front so an incomplete CSV gives a clear
+        # message ("missing required column(s): Fz") instead of a raw KeyError.
+        required = ("COP_AP", "COP_ML", "Fz", "time_s")
+        missing_cols = [c for c in required if c not in rows[0]]
+        if missing_cols:
+            raise ValueError("missing required column(s): " + ", ".join(missing_cols))
+
+        def _col(name):
+            try:
+                return np.array([float(r[name]) for r in rows])
+            except (TypeError, ValueError):
+                raise ValueError(f"column {name!r} has a non-numeric / empty value")
+
         data = {
             "path": path,
             "name": os.path.splitext(os.path.basename(path))[0],
-            "cop_ap": np.array([float(r["COP_AP"]) for r in rows]),
-            "cop_ml": np.array([float(r["COP_ML"]) for r in rows]),
-            "fz": np.array([float(r["Fz"]) for r in rows]),
-            "time": np.array([float(r["time_s"]) for r in rows]),
+            "cop_ap": _col("COP_AP"),
+            "cop_ml": _col("COP_ML"),
+            "fz": _col("Fz"),
+            "time": _col("time_s"),
             "fs": 1000.0,
             "analysis": None,
             "events": [],
@@ -5421,7 +5677,12 @@ class AnalyzeTab(QWidget):
         shown. Signals resolve through one cached :class:`Workspace`."""
         if not self._raw_curves:
             return
+        # Pass ``marker_disp`` so ComputeStep outputs that depend on a
+        # marker-derived signal (``gait:*`` / ``marker:*`` — e.g. R_heel_vel)
+        # resolve here too; without it the Workspace raises "channel unavailable"
+        # and the derived-signal curve silently stays empty (axes, no line).
         ws = Workspace(dataset, pipeline=self.pipeline,
+                       marker_disp=self._marker_display_data(dataset.get("markers")),
                        angle_result=self._angle_result_for(dataset),
                        metrics=self._subject_metrics(dataset))
         t = np.asarray(dataset["time"], dtype=float)
@@ -5435,11 +5696,23 @@ class AnalyzeTab(QWidget):
         # Faint grey for the raw curve when its filtered twin is also shown, so the
         # two are distinguishable (filtered = channel colour, raw = pale reference).
         raw_grey = "#9aa1ab"
+        # Clear any prior "could not compute" notes; re-added per failed key below.
+        for plot in set(self._raw_plots.values()):
+            self._set_plot_note(plot, "")
         for key, (raw_curve, filt_curve) in self._raw_curves.items():
             try:
                 raw_vals = ws.series(key)
-            except Exception:
+            except Exception as exc:
+                # A derived curve that can't resolve used to leave empty axes with
+                # no hint. Surface it as a small note on the plot (only when the
+                # curve is meant to be shown), and leave a log breadcrumb.
                 raw_vals = None
+                import logging
+                logging.getLogger("analysis").debug(
+                    "render: signal %r could not resolve (%s)", key, exc)
+                if self.panel_visible.get(key, False):
+                    self._set_plot_note(self._raw_plots.get(key),
+                                        "could not compute")
             if raw_vals is not None and mask is not None:
                 raw_vals = raw_vals[mask]
             spec = self.pipeline.filter_spec_for(key)
@@ -5658,6 +5931,35 @@ class AnalyzeTab(QWidget):
         else:
             curve.setData([], [])
 
+    def _set_plot_note(self, plot, text):
+        """Show (or clear) a centred note on ``plot``.
+
+        Used to surface a derived curve that could NOT be resolved (its input is
+        unavailable) so the failure is visible instead of an empty pair of axes —
+        the silent-empty-graph class of bug. ``text`` empty/None removes the note.
+        The note is parented with ``ignoreBounds`` so it never skews auto-range,
+        and ``plot._note_text`` records the current text (read by tests)."""
+        if plot is None:
+            return
+        note = getattr(plot, "_note_item", None)
+        if not text:
+            if note is not None:
+                try:
+                    plot.removeItem(note)
+                except Exception:
+                    pass
+                plot._note_item = None
+            plot._note_text = ""
+            return
+        if note is None:
+            note = pg.TextItem(anchor=(0.5, 0.5), color=S.TEXT_MUTED)
+            plot.addItem(note, ignoreBounds=True)
+            plot._note_item = note
+        note.setText(text)
+        rect = plot.getPlotItem().getViewBox().viewRect()
+        note.setPos(rect.center().x(), rect.center().y())
+        plot._note_text = text
+
     def _run_analysis(self):
         """Run analysis on the checked files. Returns True if results were shown."""
         if not self.datasets:
@@ -5828,6 +6130,8 @@ class AnalyzeTab(QWidget):
     def _event_channel_options(self, dataset):
         # Every plottable signal (COP/force/markers/joint angles) can drive an
         # event — sourced from the shared signal registry (core/signals).
+        if dataset is None:
+            return []
         from core import signals
         markers = dataset.get("markers")
         disp = self._marker_display_data(markers) if markers else None

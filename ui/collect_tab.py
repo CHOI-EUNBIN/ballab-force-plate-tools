@@ -12,7 +12,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame,
-    QPushButton, QLabel, QLineEdit, QDoubleSpinBox,
+    QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QComboBox,
     QFileDialog, QStackedWidget, QSplitter, QSizePolicy, QScrollArea,
     QCheckBox, QMessageBox, QSlider,
 )
@@ -21,6 +21,7 @@ from PyQt6.QtGui import QAction
 
 from core.axis_settings import AxisSettings
 from core import qtm_client
+from core import kunwei_client
 from ui.style import (
     ACCENT_TEAL, ACCENT_RED, TEXT_PRIMARY, TEXT_SECONDARY,
     BORDER, GRAPH_BG, GRAPH_FG, BG_PANEL, BG_MID, BG_INPUT,
@@ -39,6 +40,35 @@ C_AP    = "#7F77DD"
 C_ML    = "#D4537E"
 C_TRAJ  = "#AAAAAA"
 C_DOT   = "#FFFF00"
+
+# Live signal sources. Default IP is the sensor/server address per source.
+SRC_KUNWEI = "Kunwei Force Plate"
+SRC_QTM    = "Qualisys (QTM)"
+SRC_DEMO   = "Demo"
+SOURCE_DEFAULT_IP = {
+    SRC_KUNWEI: "192.168.1.28",   # force-plate Server IP (UDP)
+    SRC_QTM:    "127.0.0.1",
+    SRC_DEMO:   "",
+}
+
+# Samples averaged to capture the zero (tare) baseline when "Zero" is pressed.
+TARE_SAMPLES = 100
+
+
+def _tare_offset(samples):
+    """Per-channel mean of a list of equal-length sample vectors (or None)."""
+    n = len(samples)
+    if n == 0:
+        return None
+    cols = len(samples[0])
+    return [sum(s[i] for s in samples) / n for i in range(cols)]
+
+
+def _apply_offset(vals, offset):
+    """Subtract a per-channel baseline offset; identity when offset is None."""
+    if offset is None:
+        return vals
+    return [v - o for v, o in zip(vals, offset)]
 
 
 class State(Enum):
@@ -71,6 +101,10 @@ class CollectTab(QWidget):
         self.state        = State.IDLE
         self.data_queue   = queue.Queue(maxsize=100000)
         self.qtm_thread   = None
+        self.live_client  = None   # active source client (Kunwei/QTM/Dummy)
+        self.live_paused  = False  # True when stream paused (settings kept)
+        self.tare_offset  = None   # per-channel baseline offset (8) or None
+        self._tare_collect = None  # accumulating samples while zeroing
 
         self.sample_count = 0
         self.t_buf   = deque(maxlen=BUFFER_SIZE)
@@ -150,13 +184,18 @@ class CollectTab(QWidget):
         cl = QVBoxLayout(conn)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(4)
+        self.source_combo = QComboBox()
+        self.source_combo.addItems([SRC_KUNWEI, SRC_QTM, SRC_DEMO])
+        self.source_combo.setObjectName("source-combo")
+        self.source_combo.currentTextChanged.connect(self._on_source_changed)
+        cl.addWidget(self.source_combo)
         ip_row = QHBoxLayout()
         ip_row.setSpacing(4)
-        self.ip_input = QLineEdit(self.qtm_ip)
+        self.ip_input = QLineEdit(SOURCE_DEFAULT_IP[SRC_KUNWEI])
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setObjectName("small-btn")
         self.connect_btn.setFixedHeight(22)
-        self.connect_btn.clicked.connect(self._connect_qtm)
+        self.connect_btn.clicked.connect(self._on_connect_clicked)
         ip_row.addWidget(self.ip_input)
         ip_row.addWidget(self.connect_btn)
         cl.addLayout(ip_row)
@@ -166,6 +205,33 @@ class CollectTab(QWidget):
         )
         self.qtm_status_lbl.setWordWrap(True)
         cl.addWidget(self.qtm_status_lbl)
+
+        # Pause/resume the live stream without dropping the connection settings
+        # (stops the polling thread to free CPU; resumes instantly).
+        self.pause_btn = QPushButton("Pause Live")
+        self.pause_btn.setObjectName("small-btn")
+        self.pause_btn.setFixedHeight(22)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self._on_pause_toggle)
+        cl.addWidget(self.pause_btn)
+
+        # Zero (tare): average a short unloaded baseline and subtract it from all
+        # subsequent live + recorded samples. Clear removes the offset.
+        tare_row = QHBoxLayout()
+        tare_row.setSpacing(4)
+        self.zero_btn = QPushButton("Zero")
+        self.zero_btn.setObjectName("small-btn")
+        self.zero_btn.setFixedHeight(22)
+        self.zero_btn.setToolTip("무부하 상태에서 눌러 영점(0) 보정")
+        self.zero_btn.clicked.connect(self._on_zero)
+        self.clear_zero_btn = QPushButton("Clear Zero")
+        self.clear_zero_btn.setObjectName("small-btn")
+        self.clear_zero_btn.setFixedHeight(22)
+        self.clear_zero_btn.clicked.connect(self._on_clear_zero)
+        tare_row.addWidget(self.zero_btn)
+        tare_row.addWidget(self.clear_zero_btn)
+        cl.addLayout(tare_row)
+
         cl.addStretch()
         col.addWidget(self._make_section("Connection", conn, expanded=True))
         col.addWidget(self._hsep())
@@ -198,19 +264,19 @@ class CollectTab(QWidget):
         panels_layout = QVBoxLayout(panels_container)
         panels_layout.setContentsMargins(0, 0, 0, 0)
         panels_layout.setSpacing(2)
-        for key, label in [
-            ("fx", "Force X"),
-            ("fy", "Force Y"),
-            ("fz", "Force Z"),
-            ("traj", "COP Trajectory"),
-            ("ap", "COP AP"),
-            ("ml", "COP ML"),
+        for key, label, default in [
+            ("fx", "Force X", True),
+            ("fy", "Force Y", True),
+            ("fz", "Force Z", True),
+            ("traj", "COP Trajectory", False),   # off by default
+            ("ap", "COP X", True),
+            ("ml", "COP Y", True),
         ]:
             cb = QCheckBox(label)
-            cb.setChecked(True)
+            cb.setChecked(default)
             cb.stateChanged.connect(self._rebuild_plot_layout)
             self.panel_checks[key] = cb
-            self.panel_visible[key] = True
+            self.panel_visible[key] = default
             panels_layout.addWidget(cb)
         panels_layout.addStretch()
         col.addWidget(self._make_section("Graph", panels_container, expanded=False))
@@ -223,16 +289,18 @@ class CollectTab(QWidget):
         # Record / Stop control lives in the bottom bar.
         actions = QHBoxLayout()
         actions.setSpacing(2)
-        self.save_btn = QPushButton("S")
+        self.save_btn = QPushButton("Save File")
         self.save_btn.setObjectName("save-btn")
-        self.save_btn.setFixedSize(24, 22)
-        self.save_btn.setToolTip("Save recording")
+        self.save_btn.setFixedHeight(22)
+        self.save_btn.setMinimumWidth(72)
+        self.save_btn.setToolTip("Save recording to a CSV file")
         self.save_btn.clicked.connect(self._save_data)
-        self.clear_btn = QPushButton("X")
+        self.clear_btn = QPushButton("New Rec")
         self.clear_btn.setObjectName("clear-btn")
-        self.clear_btn.setFixedSize(24, 22)
-        self.clear_btn.setToolTip("Clear recording")
-        self.clear_btn.clicked.connect(self._clear_data)
+        self.clear_btn.setFixedHeight(22)
+        self.clear_btn.setMinimumWidth(72)
+        self.clear_btn.setToolTip("Discard this recording and start a new one")
+        self.clear_btn.clicked.connect(self._start_recording)
         actions.addStretch(1)
         actions.addWidget(self.save_btn)
         actions.addWidget(self.clear_btn)
@@ -307,6 +375,9 @@ class CollectTab(QWidget):
             self.record_toggle_btn.setText("NEW REC" if review else "REC")
         self.record_toggle_btn.style().unpolish(self.record_toggle_btn)
         self.record_toggle_btn.style().polish(self.record_toggle_btn)
+        # In review the explicit Save File / New Rec buttons take over, so the
+        # bottom REC/STOP toggle is hidden to avoid a duplicate "new recording".
+        self.record_toggle_btn.setVisible(not review)
         self.save_btn.setVisible(review)
         self.clear_btn.setVisible(review)
 
@@ -365,20 +436,24 @@ class CollectTab(QWidget):
             "fx": ("Force X", "Fx (N)", C_FX),
             "fy": ("Force Y", "Fy (N)", C_FY),
             "fz": ("Force Z", "Fz (N)", C_FZ),
-            "ap": ("COP AP", "AP (mm)", C_AP),
-            "ml": ("COP ML", "ML (mm)", C_ML),
+            "ap": ("COP X", "X (mm)", C_AP),
+            "ml": ("COP Y", "Y (mm)", C_ML),
         }
         title, ylabel, color = spec[key]
         p = self._new_plot_widget(title)
         p.setLabel("left", ylabel, color=GRAPH_FG, size="9pt")
         curve = p.plot(pen=pg.mkPen(color, width=1.5))
+        # Y auto-fits the data actually in view, so small signals (e.g. ~0-20 N
+        # of unloaded noise) fill the plot instead of being flattened by a fixed
+        # full-scale range.
+        p.enableAutoRange(axis="y")
+        p.setAutoVisible(y=True)
         if key == "fx":
             self.p_fx, self.c_fx = p, curve
         elif key == "fy":
             self.p_fy, self.c_fy = p, curve
         elif key == "fz":
             self.p_fz, self.c_fz = p, curve
-            p.setYRange(0, 1200)
         elif key == "ap":
             self.p_ap, self.c_ap = p, curve
         else:
@@ -532,6 +607,17 @@ class CollectTab(QWidget):
                         fx, fy, fz, cop_ap, cop_ml, mx, my, mz
                     )
 
+                # Zero (tare): collect a short baseline, then subtract it from
+                # every channel of every subsequent sample (live + recording).
+                vals = [fx, fy, fz, cop_ap, cop_ml, mx, my, mz]
+                if self._tare_collect is not None:
+                    self._tare_collect.append(vals)
+                    if len(self._tare_collect) >= TARE_SAMPLES:
+                        self.tare_offset = _tare_offset(self._tare_collect)
+                        self._tare_collect = None
+                fx, fy, fz, cop_ap, cop_ml, mx, my, mz = \
+                    _apply_offset(vals, self.tare_offset)
+
                 self.t_buf.append(self.sample_count)
                 self.fx_buf.append(fx)
                 self.fy_buf.append(fy)
@@ -586,20 +672,125 @@ class CollectTab(QWidget):
         if fz:
             self.stat_fz.setValue(f"{fz[-1]:.0f}", "N")
 
-    def _connect_qtm(self):
+    def _on_source_changed(self, source: str):
+        """Swap the IP field default and DROP any active connection.
+
+        Only one source streams at a time, so changing the source must tear the
+        previous one down and reset the status -- otherwise a stale "Connected"
+        from another source would linger and the new source would never start.
+        """
+        self.ip_input.setText(SOURCE_DEFAULT_IP.get(source, ""))
+        self.ip_input.setEnabled(source != SRC_DEMO)
+        self._disconnect_live()
+        self._set_status("Disconnected", ACCENT_RED, stat="Offline")
+        self.connect_btn.setText("Connect")
+        self._reset_pause_ui()
+
+    def _disconnect_live(self):
+        """Stop the active source client (if any) and drop buffered samples."""
+        client = self.live_client
+        self.live_client = None
+        self.live_paused = False
+        if client is not None:
+            try:
+                client.stop()
+            except Exception:
+                pass
+        try:
+            while True:
+                self.data_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+    def _set_status(self, text, color, stat=None):
+        self.qtm_status_lbl.setText(text)
+        self.qtm_status_lbl.setStyleSheet(f"color:{color};font-size:11px;")
+        if stat is not None and hasattr(self, "stat_status"):
+            self.stat_status.setValue(stat, "")
+
+    def _reset_pause_ui(self):
+        self.live_paused = False
+        if hasattr(self, "pause_btn"):
+            self.pause_btn.setEnabled(False)
+            self.pause_btn.setText("Pause Live")
+
+    def _on_connect_clicked(self):
+        """Connect button doubles as Disconnect once a source is streaming."""
+        if self.live_client is None and not self.live_paused:
+            self._connect_source()
+            self.connect_btn.setText("Disconnect")
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.setText("Pause Live")
+        else:
+            self._disconnect_live()
+            self._set_status("Disconnected", ACCENT_RED, stat="Offline")
+            self.connect_btn.setText("Connect")
+            self._reset_pause_ui()
+
+    def _connect_source(self):
         self._auto_reconnect = True
-        if self.qtm_thread and self.qtm_thread.is_alive():
-            return
-        ip = self.ip_input.text().strip() or "127.0.0.1"
-        self.qtm_status_lbl.setText("Connecting...")
-        self.qtm_status_lbl.setStyleSheet(f"color:{TEXT_SECONDARY};font-size:11px;")
-        self.qtm_thread = threading.Thread(
-            target=qtm_client.run_qtm,
-            args=(ip, self.data_queue,
-                  lambda s: self._qtm_signal.emit(s)),
-            daemon=True,
-        )
-        self.qtm_thread.start()
+        # Always start clean: stop whatever (if anything) is currently streaming.
+        self._disconnect_live()
+        self.live_paused = False
+        self._set_status("Connecting...", TEXT_SECONDARY)
+        self._spawn_live_client()
+
+    def _spawn_live_client(self):
+        """Create + start the client for the currently selected source.
+
+        Shared by initial Connect and by Resume, so resuming reuses the same
+        source/IP without the user re-entering anything.
+        """
+        source = self.source_combo.currentText()
+        status_cb = lambda s: self._qtm_signal.emit(s)
+        if source == SRC_KUNWEI:
+            sensor_ip = self.ip_input.text().strip() or SOURCE_DEFAULT_IP[SRC_KUNWEI]
+            self.live_client = kunwei_client.KunweiClient(
+                sensor_ip, self.data_queue, status_cb, local_ip="192.168.1.100")
+        elif source == SRC_DEMO:
+            self.live_client = qtm_client.DummyClient(self.data_queue, status_cb)
+        else:  # SRC_QTM
+            ip = self.ip_input.text().strip() or SOURCE_DEFAULT_IP[SRC_QTM]
+            self.live_client = qtm_client.QTMClient(ip, self.data_queue, status_cb)
+
+        self.live_client.start()
+        # Keep .qtm_thread pointing at the live worker for any is_alive() checks.
+        self.qtm_thread = getattr(self.live_client, "_thread", None)
+
+    # -- live pause / resume (keeps connection settings) ------------------
+    def _on_pause_toggle(self):
+        if self.live_paused:
+            self._resume_live()
+        else:
+            self._pause_live()
+
+    def _pause_live(self):
+        """Stop the polling thread to free CPU, but keep settings for resume."""
+        client = self.live_client
+        self.live_client = None
+        if client is not None:
+            try:
+                client.stop()
+            except Exception:
+                pass
+        self.live_paused = True
+        self.pause_btn.setText("Resume Live")
+        self._set_status("Paused", TEXT_SECONDARY, stat="Paused")
+
+    def _resume_live(self):
+        self.live_paused = False
+        self._set_status("Connecting...", TEXT_SECONDARY)
+        self._spawn_live_client()
+        self.pause_btn.setText("Pause Live")
+
+    # -- zero / tare ------------------------------------------------------
+    def _on_zero(self):
+        """Begin capturing a baseline window; offset is computed in _update."""
+        self._tare_collect = []
+
+    def _on_clear_zero(self):
+        self.tare_offset = None
+        self._tare_collect = None
 
     def _try_reconnect(self):
         return
@@ -609,23 +800,42 @@ class CollectTab(QWidget):
             self.qtm_status_lbl.setText("Connected")
             self.qtm_status_lbl.setStyleSheet(f"color:{ACCENT_TEAL};font-size:11px;")
             self.stat_status.setValue("Live", "")
+            self.pause_btn.setEnabled(True)
         elif status.startswith("error:"):
             msg = status[6:].strip()
             self.qtm_status_lbl.setText(msg)
             self.qtm_status_lbl.setStyleSheet(f"color:{ACCENT_RED};font-size:11px;")
             self.stat_status.setValue("Error", "")
+            self.live_client = None
+            self.connect_btn.setText("Connect")
+            self._reset_pause_ui()
         else:
             self.qtm_status_lbl.setText("Disconnected")
             self.qtm_status_lbl.setStyleSheet(f"color:{ACCENT_RED};font-size:11px;")
+            self.connect_btn.setText("Connect")
             self.stat_status.setValue("Offline", "")
+            self._reset_pause_ui()
 
     def _start_recording(self):
+        # If the live preview was paused, recording resumes the stream first.
+        if self.live_paused:
+            self._resume_live()
         self._stop_playback()
         while True:
             try:
                 self.data_queue.get_nowait()
             except queue.Empty:
                 break
+
+        # Start on a FRESH graph so the recording's first sample is visibly the
+        # start: clear the rolling live buffers and reset the sample counter.
+        for buf in (self.t_buf, self.fx_buf, self.fy_buf,
+                    self.fz_buf, self.ap_buf, self.ml_buf):
+            buf.clear()
+        self.sample_count = 0
+        self._fs_last_time = None
+        self._fs_last_count = 0
+        self._refresh_plot_data()
 
         self.rec_data   = []
         self.rec_count  = 0
@@ -799,9 +1009,12 @@ class CollectTab(QWidget):
             w.writeheader()
             w.writerows(self.rec_data)
 
-        self.stat_status.setValue("Saved", "")
         QMessageBox.information(self, "Saved", f"Saved recording:\n{raw_path}")
         print(f"[Saved] {raw_path}")
+        # After saving, return to a fresh live graph so the next take is clearly
+        # a new, empty recording.
+        self._reset_live_data()
+        self.stat_status.setValue("Saved", "")
 
     def _clear_data(self):
         self._stop_playback()

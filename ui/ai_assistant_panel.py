@@ -2,9 +2,12 @@
 # RAG 질의응답 패널(독립 QWidget) — 채팅형 UI.
 # 네트워크 호출은 워커 스레드에서만(UI 안 얼게). Task 5에서 QDockWidget에 담아 우측에 붙인다.
 # 색·치수는 ui.style 토큰(S.*)만 사용(테마 적응). 이모지 금지.
+import math
+import re
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QFrame,
+    QPushButton, QScrollArea, QFrame, QGraphicsOpacityEffect,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -26,6 +29,48 @@ def doi_url(doi):
     if doi.startswith("http"):
         return doi
     return f"https://doi.org/{doi}"
+
+
+class TypingIndicator(QWidget):
+    """대기 중 '생각하는 점' — 점 3개가 시차를 두고 은은하게 맥동(opacity pulse).
+    Claude의 thinking indicator 느낌. 이모지 없이 색은 S.* 토큰만 사용."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._dots = []
+        self._effects = []
+        h = QHBoxLayout(self)
+        h.setContentsMargins(2, 6, 0, 6)
+        h.setSpacing(5)
+        for _ in range(3):
+            d = QFrame()
+            d.setFixedSize(7, 7)
+            d.setStyleSheet(
+                f"background:{S.TEXT_MUTED}; border-radius:3px;")
+            eff = QGraphicsOpacityEffect(d)
+            eff.setOpacity(0.3)
+            d.setGraphicsEffect(eff)
+            self._dots.append(d)
+            self._effects.append(eff)
+            h.addWidget(d)
+        h.addStretch(1)
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+    def start(self):
+        self._phase = 0.0
+        self._timer.start(50)
+
+    def stop(self):
+        self._timer.stop()
+
+    def _tick(self):
+        self._phase += 0.22
+        for i, eff in enumerate(self._effects):
+            # 점마다 위상차 → 물결처럼 흐르는 맥동. 0.25~1.0 사이.
+            s = math.sin(self._phase - i * 0.9)
+            eff.setOpacity(0.25 + 0.75 * (s * 0.5 + 0.5))
 
 
 class AskWorker(QThread):
@@ -76,12 +121,19 @@ class AiAssistantPanel(QWidget):
         self._worker = None
         self._health_worker = None
         self._closing = False
-        self._dots = 0
         self._has_messages = False
         self._last_question = ""
         self._history = []  # 멀티턴: 최근 대화 [{role, content}, ...]
         self._pending_body = None
         self._pending_src = None
+        self._pending_indicator = None
+        self._pending_res = None
+        # 타이핑(typewriter) 상태
+        self._type_tokens = []
+        self._type_idx = 0
+        self._type_timer = None
+        self._cursor_timer = None
+        self._cursor_on = True
         self.setObjectName("aiPanel")
         self.setMinimumWidth(320)
         self._build_ui()
@@ -237,10 +289,12 @@ class AiAssistantPanel(QWidget):
         v = QVBoxLayout(box)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(4)
-        body = QLabel("Generating")
+        indicator = TypingIndicator()
+        body = QLabel("")
         body.setObjectName("answerBody")
         body.setTextFormat(Qt.TextFormat.PlainText)
         body.setWordWrap(True)
+        body.hide()  # 답 도착 후 타이핑 시작 때 표시
         src = QLabel("")
         src.setObjectName("sourceLine")
         src.setTextFormat(Qt.TextFormat.RichText)
@@ -248,10 +302,11 @@ class AiAssistantPanel(QWidget):
         src.setOpenExternalLinks(False)
         src.linkActivated.connect(self._open_link)
         src.hide()
+        v.addWidget(indicator)
         v.addWidget(body)
         v.addWidget(src)
         self._append(box)
-        return body, src
+        return body, src, indicator
 
     def _scroll_bottom_later(self):
         QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
@@ -289,9 +344,9 @@ class AiAssistantPanel(QWidget):
         self._last_question = q
         self.input.clear()
         self._add_user_bubble(q)
-        self._pending_body, self._pending_src = self._add_answer_block()
+        self._pending_body, self._pending_src, self._pending_indicator = self._add_answer_block()
         self._set_busy(True)
-        self._start_dots()
+        self._pending_indicator.start()
         self._scroll_bottom_later()
         self._worker = AskWorker(self.base_url, q, "auto", history=list(self._history))
         self._worker.done.connect(self._on_done)
@@ -302,45 +357,96 @@ class AiAssistantPanel(QWidget):
         self.input.setEnabled(not busy)
         self.send_btn.setEnabled(not busy)
 
-    def _start_dots(self):
-        if getattr(self, "_timer", None):
-            self._timer.stop()
-        self._dots = 0
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start(400)
-        self._tick()
+    def _stop_indicator(self):
+        if self._pending_indicator is not None:
+            self._pending_indicator.stop()
+            self._pending_indicator.hide()
 
-    def _tick(self):
-        self._dots = (self._dots + 1) % 4
+    # ---- 타이핑(typewriter) ----
+    def _stop_typing(self):
+        for t in (self._type_timer, self._cursor_timer):
+            if t is not None:
+                t.stop()
+        self._type_timer = None
+        self._cursor_timer = None
+
+    def _start_typing(self, text):
+        """답변 텍스트를 단어 단위로 점진 노출 + 끝에 깜빡이는 커서."""
+        self._stop_indicator()
+        self._stop_typing()
+        # 공백을 포함해 토큰화(줄바꿈/연속 공백 보존).
+        self._type_tokens = re.findall(r"\S+\s*", text) or ([text] if text else [])
+        self._type_idx = 0
+        self._cursor_on = True
         if self._pending_body is not None:
-            self._pending_body.setText("Generating" + "." * self._dots)
+            self._pending_body.setStyleSheet("")
+            self._pending_body.setText("")
+            self._pending_body.show()
+        if not self._type_tokens:
+            self._finish_typing()
+            return
+        # 긴 답변도 ~3초 안에 끝나도록 틱당 토큰 수를 조절.
+        self._type_step = max(1, len(self._type_tokens) // 150)
+        self._type_timer = QTimer(self)
+        self._type_timer.timeout.connect(self._type_tick)
+        self._type_timer.start(18)
+        self._cursor_timer = QTimer(self)
+        self._cursor_timer.timeout.connect(self._cursor_blink)
+        self._cursor_timer.start(450)
+        self._render_typing()
 
-    def _stop_dots(self):
-        if getattr(self, "_timer", None):
-            self._timer.stop()
+    def _typed_text(self):
+        return "".join(self._type_tokens[:self._type_idx])
+
+    def _render_typing(self):
+        if self._pending_body is None:
+            return
+        cursor = "▍" if self._cursor_on else " "  # ▍ / 빈 폭 유지
+        self._pending_body.setText(self._typed_text() + cursor)
+
+    def _type_tick(self):
+        self._type_idx = min(self._type_idx + self._type_step, len(self._type_tokens))
+        self._render_typing()
+        # 타이핑 따라 살짝씩 스크롤(끝에 거의 붙어 있을 때만).
+        sb = self._scroll.verticalScrollBar()
+        if sb.maximum() - sb.value() < 80:
+            sb.setValue(sb.maximum())
+        if self._type_idx >= len(self._type_tokens):
+            self._finish_typing()
+
+    def _cursor_blink(self):
+        self._cursor_on = not self._cursor_on
+        self._render_typing()
+
+    def _finish_typing(self):
+        self._stop_typing()
+        if self._pending_body is not None:
+            self._pending_body.setText(self._typed_text())  # 커서 제거, 최종 고정
+        res = self._pending_res
+        self._pending_res = None
+        if res is not None:
+            self._render_sources(res.get("sources", []))
+            self.status_text.setText(f"Done ({res.get('timings', {}).get('llm', '?')}s)")
+        self._scroll_bottom_later()
 
     def _on_done(self, res):
         if self._closing:
             return
-        self._stop_dots()
+        self._stop_indicator()
         self._set_busy(False)
         if res.get("error"):  # 방어적(서비스가 200으로 error 준 경우)
             self._render_error(res["error"])
             return
         self._set_dot(S.ACCENT_GREEN)  # 답이 왔으니 연결 정상
         answer_text = res.get("answer", "")
-        if self._pending_body is not None:
-            self._pending_body.setStyleSheet("")
-            self._pending_body.setText(answer_text)
         # 멀티턴: 성공한 질문/답변을 대화 기억에 추가(최근 3턴=6메시지만 유지)
         if answer_text:
             self._history.append({"role": "user", "content": self._last_question})
             self._history.append({"role": "assistant", "content": answer_text})
             self._history = self._history[-6:]
-        self._render_sources(res.get("sources", []))
-        self.status_text.setText(f"Done ({res.get('timings', {}).get('llm', '?')}s)")
-        self._scroll_bottom_later()
+        # Sources/상태는 타이핑이 끝난 뒤 표시 — res를 보관.
+        self._pending_res = res
+        self._start_typing(answer_text)
 
     def _render_sources(self, sources):
         if self._pending_src is None:
@@ -360,13 +466,16 @@ class AiAssistantPanel(QWidget):
     def _on_failed(self, msg):
         if self._closing:
             return
-        self._stop_dots()
+        self._stop_indicator()
         self._set_busy(False)
         self._set_dot(S.ACCENT_RED)  # 실패 = 연결 문제일 수 있음
         self._render_error(msg)
 
     def _render_error(self, msg):
+        self._stop_indicator()
+        self._stop_typing()
         if self._pending_body is not None:
+            self._pending_body.show()
             self._pending_body.setStyleSheet(f"color: {S.ACCENT_RED};")
             self._pending_body.setText(msg)
         if self._pending_src is not None:
@@ -398,6 +507,8 @@ class AiAssistantPanel(QWidget):
         """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지).
         패널은 dock에 임베드돼 자체 closeEvent를 못 받으므로 외부에서 호출한다."""
         self._closing = True
+        self._stop_typing()
+        self._stop_indicator()
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)

@@ -48,3 +48,14 @@ def test_extract_epochs_resamples_each_window():
     assert matrix.shape == (2, 11)
     assert np.isclose(matrix[0, 0], 0.0) and np.isclose(matrix[0, -1], 10.0)
     assert meta == [{"start": 0, "end": 10}, {"start": 10, "end": 20}]
+
+
+def test_extract_epochs_meta_end_clamped_to_real_slice():
+    """A window whose end index runs past the array is silently clipped by the
+    slice; meta['end'] must report the REAL last index, not the requested one, so
+    downstream labels match the actual data (#3 robustness)."""
+    values = np.arange(10, dtype=float)             # valid indices 0..9
+    matrix, meta = extract_epochs(values, [(0, 50)], points=11)
+    assert matrix.shape == (1, 11)
+    # Requested end 50 is beyond the data; the real slice ends at index 9.
+    assert meta == [{"start": 0, "end": 9}]

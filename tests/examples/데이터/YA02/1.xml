@@ -1,0 +1,121 @@
+<?xml version="1.0"?>
+<QTM_Label_List_Ver_1.00>
+    <Trajectories>
+        <Trajectory>
+            <Name>RSHO</Name>
+            <Color R="0" G="204" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>STRN</Name>
+            <Color R="0" G="204" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LSHO</Name>
+            <Color R="0" G="204" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>C7</Name>
+            <Color R="153" G="204" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RASIS</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RPSIS</Name>
+            <Color R="255" G="192" B="203"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RThigh_F</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RThigh_B</Name>
+            <Color R="255" G="192" B="203"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RLKNEE</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RMKNEE</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RShank_F</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RShank_B</Name>
+            <Color R="255" G="192" B="203"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RLANKLE</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RMANKLE</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RHEEL</Name>
+            <Color R="255" G="192" B="203"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>RTOE</Name>
+            <Color R="255" G="0" B="255"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LASIS</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LPSIS</Name>
+            <Color R="204" G="255" B="204"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LThigh_F</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LThigh_B</Name>
+            <Color R="204" G="255" B="204"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LLKNEE</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LMKNEE</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LShank_F</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LShank_B</Name>
+            <Color R="204" G="255" B="204"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LLANKLE</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LMANKLE</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LHEEL</Name>
+            <Color R="204" G="255" B="204"/>
+        </Trajectory>
+        <Trajectory>
+            <Name>LTOE</Name>
+            <Color R="0" G="255" B="0"/>
+        </Trajectory>
+    </Trajectories>
+    <Bones>
+        <Color R="246" G="249" B="124"/>
+        <Thickness>10.000000</Thickness>
+    </Bones>
+</QTM_Label_List_Ver_1.00>

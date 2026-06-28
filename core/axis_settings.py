@@ -11,13 +11,15 @@ class AxisSettings(QObject):
         super().__init__()
         self._settings = QSettings("Balancelab", "Balancelab")
         self.live_signs = self._load_signs()
+        # NOTE: the old global "COP X is AP/ML" convention (axis/cop_x_is_ml) was
+        # retired — plate orientation varies per plate, so a single global mapping
+        # is not meaningful. Raw COP is now shown plate-locally as X/Y.
         self.foot_displacement_normalized = self._load_bool(
             "analysis/foot_displacement_normalized", False
         )
-        self.filter_enabled = self._load_bool("filter/enabled", True)
-        self.filter_type = self._load_str("filter/type", "Butterworth")
-        self.filter_cutoff_hz = self._load_float("filter/cutoff_hz", 10.0)
-        self.filter_order = self._load_int("filter/order", 4)
+        # NOTE: the old global filter fields (filter/* and filter/markers/*) were
+        # retired in C1 — filtering is now a pipeline FilterStep (single source of
+        # truth, see core/pipeline.py). Old QSettings keys are simply left unread.
 
     def _load_signs(self):
         signs = {}
@@ -43,18 +45,6 @@ class AxisSettings(QObject):
         self.foot_displacement_normalized = enabled
         self._settings.setValue("analysis/foot_displacement_normalized", enabled)
         self.changed.emit()
-
-    def set_filter_enabled(self, enabled):
-        self._set_attr("filter_enabled", "filter/enabled", bool(enabled))
-
-    def set_filter_type(self, filter_type):
-        self._set_attr("filter_type", "filter/type", str(filter_type))
-
-    def set_filter_cutoff_hz(self, cutoff_hz):
-        self._set_attr("filter_cutoff_hz", "filter/cutoff_hz", float(cutoff_hz))
-
-    def set_filter_order(self, order):
-        self._set_attr("filter_order", "filter/order", int(order))
 
     def _set_attr(self, attr, key, value):
         if getattr(self, attr) == value:

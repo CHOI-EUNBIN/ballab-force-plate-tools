@@ -10,19 +10,24 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QDialog, QLineEdit, QSpinBox, QFormLayout, QDialogButtonBox,
+    QDialog, QLineEdit, QSpinBox, QFormLayout, QDialogButtonBox, QMessageBox,
 )
 
-from core.ensemble import pool, ensemble_stats, ensemble_csv
+from core.ensemble import pool_sources, ensemble_stats, ensemble_csv
 from ui.components.cascading_signal_picker import CascadingSignalPicker
 
 
 class EnsemblePanel(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_plot=True):
         super().__init__(parent)
         self._sources = []          # list of (label, norm_dict)
         self._stats = ensemble_stats(np.empty((0, 0)))
         self._cols = []
+        # ``show_plot=False`` makes this a compact data/export facility WITHOUT a
+        # plot: the Analyze tab uses it that way because the ensemble curve is
+        # drawn ONCE in the MAIN graph area (RESULTS·Signals "Ensemble overlay"),
+        # so a second mini-plot here would be a redundant duplicate.
+        self._has_plot = bool(show_plot)
 
         v = QVBoxLayout(self)
         head = QHBoxLayout()
@@ -36,43 +41,66 @@ class EnsemblePanel(QWidget):
         head.addWidget(self._export_btn)
         v.addLayout(head)
 
-        self._plot = pg.PlotWidget()
-        self._plot.setLabel("bottom", "% cycle")
-        self._mean_curve = self._plot.plot(pen=pg.mkPen("#3B8FD9", width=2))
-        # lo/hi invisible boundary curves for the ±SD fill band; must be created
-        # before FillBetweenItem (pyqtgraph 0.14 requires curve1/curve2 upfront).
-        self._lo = self._plot.plot(pen=pg.mkPen(None))
-        self._hi = self._plot.plot(pen=pg.mkPen(None))
-        self._band = pg.FillBetweenItem(self._lo, self._hi,
-                                        brush=pg.mkBrush(59, 143, 217, 60))
-        self._plot.addItem(self._band)
-        v.addWidget(self._plot, 1)
+        if self._has_plot:
+            self._plot = pg.PlotWidget()
+            self._plot.setLabel("bottom", "% cycle")
+            self._mean_curve = self._plot.plot(pen=pg.mkPen("#3B8FD9", width=2))
+            # lo/hi invisible boundary curves for the ±SD fill band; must be created
+            # before FillBetweenItem (pyqtgraph 0.14 requires curve1/curve2 upfront).
+            self._lo = self._plot.plot(pen=pg.mkPen(None))
+            self._hi = self._plot.plot(pen=pg.mkPen(None))
+            self._band = pg.FillBetweenItem(self._lo, self._hi,
+                                            brush=pg.mkBrush(59, 143, 217, 60))
+            self._plot.addItem(self._band)
+            v.addWidget(self._plot, 1)
+        else:
+            # No plot: add a short hint so the panel isn't a bare header. The curve
+            # is viewed via RESULTS·Signals → "Ensemble overlay" (main graph area).
+            hint = QLabel("View the mean ± SD curve via Signals → "
+                          "“Ensemble overlay”. Export the pooled epochs here.")
+            hint.setObjectName("hint")
+            hint.setWordWrap(True)
+            v.addWidget(hint)
 
-    def set_sources(self, sources, title=None):
-        """``sources`` = list of ``(file_label, norm_dict)`` where ``norm_dict`` has
-        ``matrix`` (N_i x P). Pools, recomputes stats, redraws.
+    def set_sources(self, sources, title=None, mode="cycle"):
+        """``sources`` = list of ``(file_label, norm_dict)`` or
+        ``(file_label, norm_dict, subject)`` where ``norm_dict`` has ``matrix``
+        (N_i x P). Pools (``mode`` "cycle" | "subject"), recomputes stats, redraws.
 
         Optional ``title`` kwarg sets the panel title (e.g. including the step name)."""
         if title is not None:
             self._title.setText(title)
         self._sources = list(sources or [])
-        mats, cols = [], []
-        for label, nd in self._sources:
-            m = np.asarray(nd.get("matrix"), float)
-            if m.ndim == 2 and m.shape[0] > 0:
-                mats.append(m)
-                cols.extend(f"{label}#{i+1}" for i in range(m.shape[0]))
-        matrix = pool(mats) if mats else np.empty((0, 0))
-        self._matrix = matrix
-        self._cols = cols
-        self._stats = ensemble_stats(matrix)
-        self._n_label.setText(f"{self._stats['n']} epochs")
+        self._mode = mode
+        pooled = pool_sources(self._sources, mode=mode)
+        self._matrix = pooled["matrix"]
+        self._cols = pooled["columns"]
+        self._stats = pooled["stats"]
+        self._n_subjects = int(pooled.get("n_subjects", 0))
+        self._n_cycles = int(pooled.get("n_cycles", 0))
+        n = self._stats["n"]
+        # When trials are present (``self._sources``) but pooled to 0 epochs, the
+        # NormalizeStep produced no epochs — almost always an event-matching miss
+        # (e.g. cycle mode with < 2 matching events). Say so instead of a silent
+        # "0 epochs", which otherwise reads as "nothing wrong, just empty".
+        if n == 0 and self._sources:
+            self._n_label.setText("0 epochs — no segments matched (check the event)")
+            self._n_label.setStyleSheet("color:#D98F3B;")
+        else:
+            self._n_label.setText(self.count_label())
+            self._n_label.setStyleSheet("")
         self._redraw()
 
-    def set_title_suffix(self, text):
-        """Update the panel title to include ``text`` as a suffix, e.g. the step name."""
-        base = "Ensemble (% cycle)"
-        self._title.setText(f"{base} — {text}" if text else base)
+    def count_label(self):
+        """A mode-aware count string: subject mode names subjects AND cycles, cycle
+        mode names cycles. Used in the panel label and the overlay graph title."""
+        mode = getattr(self, "_mode", "cycle")
+        n_subj = getattr(self, "_n_subjects", 0)
+        n_cyc = getattr(self, "_n_cycles", int(self._stats.get("n", 0)))
+        if mode == "subject":
+            s = "subject" if n_subj == 1 else "subjects"
+            return f"{n_subj} {s} ({n_cyc} cycles)"
+        return f"{n_cyc} cycles"
 
     def n_epochs(self):
         return int(self._stats.get("n", 0))
@@ -87,6 +115,8 @@ class EnsemblePanel(QWidget):
             fh.write(text)
 
     def _redraw(self):
+        if not self._has_plot:
+            return
         x = self._stats.get("x")
         mean = self._stats.get("mean")
         sd = self._stats.get("sd")
@@ -178,6 +208,16 @@ class NormalizeStepDialog(QDialog):
         # Wire mode → event-row visibility and set initial state.
         self.mode_combo.currentIndexChanged.connect(self._sync_event_rows)
         self._sync_event_rows()
+
+    def accept(self):
+        """Validate before closing: an empty output name shows a message and
+        keeps the dialog OPEN (so the user can fix it) instead of dismissing
+        everything they entered. Mirrors ``DetectEventStepDialog.accept``."""
+        if not self.values().get("name"):
+            QMessageBox.information(self, "Output name",
+                                    "Enter a name for the normalized output.")
+            return
+        super().accept()
 
     def _sync_event_rows(self, _index=None):
         """Show only the event rows relevant to the current epoch mode.

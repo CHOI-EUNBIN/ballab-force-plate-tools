@@ -363,12 +363,16 @@ class DetectEventStepDialog(QDialog):
                ("Global minimum", "global_minimum")]
 
     def __init__(self, parent, inputs, frame_max=0, step=None, color=None,
-                 event_labels=None):
+                 event_labels=None, master_fs=1000.0):
         super().__init__(parent)
         self.setWindowTitle("Edit Event" if step else "Add Event")
         self.setModal(True)
         self.setMinimumWidth(360)
         self._frame_max = max(0, int(frame_max))
+        # Master-clock rate (Hz): the refractory ("Min spacing") is authored in
+        # SECONDS and converted to frames at run time with this fs, so the value
+        # means the same real time on every trial. Shown next to the field.
+        self._master_fs = float(master_fs) if master_fs else 1000.0
         # Labels of OTHER detect steps defined earlier in the pipeline — offered
         # as the "Event" search-window bound type. Empty -> the Event type has no
         # selectable labels (the user just uses Frame bounds).
@@ -473,14 +477,28 @@ class DetectEventStepDialog(QDialog):
             "velocity/acceleration turning points, apply this to a differentiated "
             "signal.")
 
-        # shared noise guard
-        self.min_distance_spin = QSpinBox()
-        self.min_distance_spin.setRange(0, 1000000)
-        self.min_distance_spin.setValue(int(p.get("min_distance") or 0))
-        self.min_distance_spin.setSuffix(" frames")
+        # shared noise guard — authored in SECONDS (G1), clock-independent.
+        self.min_distance_spin = QDoubleSpinBox()
+        self.min_distance_spin.setRange(0.0, 10.0)
+        self.min_distance_spin.setDecimals(3)
+        self.min_distance_spin.setSingleStep(0.05)
+        self.min_distance_spin.setSuffix(" s")
+        # Load seconds directly; fall back to converting a legacy frame value
+        # (saved before G1) to seconds via the master fs so editing an old step
+        # shows the equivalent time rather than silently resetting to 0.
+        md_s = p.get("min_distance_s")
+        if md_s is None and p.get("min_distance"):
+            md_s = float(p["min_distance"]) / self._master_fs
+        self.min_distance_spin.setValue(float(md_s or 0.0))
         self.min_distance_spin.setToolTip(
-            "0 = off. Smallest gap (in frames) allowed between two detected "
-            "instances — drops events that fire too close together.")
+            "0 = off. Smallest gap (in seconds) allowed between two detected "
+            "instances — drops events that fire too close together. Seconds mean "
+            "the same real time on every trial, regardless of sample rate.")
+        # Muted hint: the master clock + the seconds→frames the value resolves to.
+        self.min_distance_hint = QLabel()
+        self.min_distance_hint.setStyleSheet("color: gray;")
+        self.min_distance_spin.valueChanged.connect(self._sync_min_distance_hint)
+        self._sync_min_distance_hint()
 
         # --- instance selector (which of the detected occurrences to keep) ---
         self.selector_combo = QComboBox()
@@ -557,6 +575,8 @@ class DetectEventStepDialog(QDialog):
         guard = self._form_group("Noise guard", hint_key="Detect.Noise guard")
         self.min_distance_label = QLabel("Min spacing")
         guard.addRow(self.min_distance_label, self.min_distance_spin)
+        self.min_distance_hint_label = QLabel("")
+        guard.addRow(self.min_distance_hint_label, self.min_distance_hint)
         self.hysteresis_label = QLabel("Re-trigger guard")
         guard.addRow(self.hysteresis_label, self.hysteresis_spin)
         self.guard_group = guard.box
@@ -639,16 +659,19 @@ class DetectEventStepDialog(QDialog):
     def _build_scope_bound_row(self, label_text, default_frame=0):
         """Build ONE search-window bound (From or To) as a dict of widgets.
 
-        Variant B: a [Type combo: Frame | Event] + a value area that swaps
-        between a frame QSpinBox and an (event-label combo + instance spin). The
-        whole thing sits on one row holder so it drops into the form as a single
-        field. Returns ``{label, row, type_combo, frame_spin, event_combo,
-        instance_spin}`` so the caller (layout + show/hide + values) can reach
-        each piece."""
+        Variant B: a [Type combo: Frame | Time | Event] + a value area that swaps
+        between a frame QSpinBox, a seconds QDoubleSpinBox and an (event-label
+        combo + instance spin). The whole thing sits on one row holder so it drops
+        into the form as a single field. Returns ``{label, row, type_combo,
+        frame_spin, time_spin, event_combo, instance_spin}`` so the caller
+        (layout + show/hide + values) can reach each piece."""
         label = QLabel(label_text)
 
         type_combo = QComboBox()
         type_combo.addItem("Frame", "frame")
+        # Time: a seconds bound that resolves to round(s * master fs) — the same
+        # real-time window on every trial, like the seconds refractory (G1).
+        type_combo.addItem("Time", "time")
         type_combo.addItem("Event", "event")
         type_combo.setMaximumWidth(80)
 
@@ -658,6 +681,16 @@ class DetectEventStepDialog(QDialog):
         # the whole trial (not a 0..0 empty window).
         frame_spin.setValue(max(0, min(int(default_frame), self._frame_max)))
         frame_spin.setMaximumWidth(110)
+
+        time_spin = QDoubleSpinBox()
+        time_spin.setRange(0.0, 1.0e6)
+        time_spin.setDecimals(3)
+        time_spin.setSingleStep(0.01)
+        time_spin.setSuffix(" s")
+        time_spin.setMaximumWidth(110)
+        time_spin.setToolTip(
+            "Window bound in seconds (resolves to round(seconds × master fs) "
+            "frames, so it means the same real time at any sample rate).")
 
         event_combo = QComboBox()
         for lab in self._event_labels:
@@ -672,14 +705,16 @@ class DetectEventStepDialog(QDialog):
             "end (-1 = last).")
 
         # Holder: Type combo + value area on one line. The value area is a stacked
-        # pair (frame-spin) / (event-combo + instance-spin); we show/hide rather
-        # than use QStackedWidget so the row keeps a tight, single-line height.
+        # set (frame-spin) / (time-spin) / (event-combo + instance-spin); we
+        # show/hide rather than use QStackedWidget so the row keeps a tight,
+        # single-line height.
         row = QWidget()
         hl = QHBoxLayout(row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(6)
         hl.addWidget(type_combo)
         hl.addWidget(frame_spin)
+        hl.addWidget(time_spin)
         hl.addWidget(event_combo, 1)
         hl.addWidget(instance_spin)
 
@@ -690,6 +725,7 @@ class DetectEventStepDialog(QDialog):
             "row": row,
             "type_combo": type_combo,
             "frame_spin": frame_spin,
+            "time_spin": time_spin,
             "event_combo": event_combo,
             "instance_spin": instance_spin,
         }
@@ -728,6 +764,11 @@ class DetectEventStepDialog(QDialog):
             except (TypeError, ValueError):
                 fv = 0
             bound_row["frame_spin"].setValue(max(0, min(fv, self._frame_max)))
+        elif btype == "time":
+            try:
+                bound_row["time_spin"].setValue(float(bound.get("seconds", 0.0)))
+            except (TypeError, ValueError):
+                bound_row["time_spin"].setValue(0.0)
         elif btype == "event":
             li = bound_row["event_combo"].findData(bound.get("label"))
             if li >= 0:
@@ -739,9 +780,12 @@ class DetectEventStepDialog(QDialog):
 
     def _scope_bound_value(self, bound_row):
         """Read one bound row -> a scope-bound dict the engine resolves:
-        ``{"type":"frame","frame":N}`` or ``{"type":"event","label":L,
-        "instance":i}``."""
+        ``{"type":"frame","frame":N}``, ``{"type":"time","seconds":s}`` or
+        ``{"type":"event","label":L,"instance":i}``."""
         btype = bound_row["type_combo"].currentData()
+        if btype == "time":
+            return {"type": "time",
+                    "seconds": float(bound_row["time_spin"].value())}
         if btype == "event":
             return {
                 "type": "event",
@@ -818,12 +862,26 @@ class DetectEventStepDialog(QDialog):
         self._set_row_visible(self.hysteresis_label, self.hysteresis_spin, is_thr)
         self._set_row_visible(self.min_distance_label, self.min_distance_spin,
                               is_thr or is_peak)
+        self._set_row_visible(self.min_distance_hint_label, self.min_distance_hint,
+                              is_thr or is_peak)
         self.guard_group.setVisible(is_thr or is_peak)
         # Global max/min has a single instance -> hide the whole Instance group
         # (the Search window stays so the user can still window the search).
         self.instance_group.setVisible(not is_global)
         self._sync_selector_fields()
         self._sync_scope_fields()
+
+    def _sync_min_distance_hint(self):
+        """Muted label showing the master clock and the frames the seconds
+        refractory resolves to (round(s * fs)), so the value is unambiguous."""
+        s = float(self.min_distance_spin.value())
+        if s > 0:
+            frames = max(1, round(s * self._master_fs))
+            self.min_distance_hint.setText(
+                f"master {self._master_fs:g} Hz  ≈ {frames} frames")
+        else:
+            self.min_distance_hint.setText(
+                f"master {self._master_fs:g} Hz  (0 = off)")
 
     def _sync_selector_fields(self):
         method = self.method_combo.currentData()
@@ -855,11 +913,16 @@ class DetectEventStepDialog(QDialog):
 
     def _set_scope_row_visible(self, bound_row, visible):
         """Show/hide one bound row + (when shown) toggle its value widgets to match
-        the row's Type (Frame -> frame-spin; Event -> event-combo + instance)."""
+        the row's Type (Frame -> frame-spin; Time -> time-spin; Event ->
+        event-combo + instance)."""
         bound_row["label"].setVisible(visible)
         bound_row["row"].setVisible(visible)
-        is_event = bound_row["type_combo"].currentData() == "event"
-        bound_row["frame_spin"].setVisible(visible and not is_event)
+        btype = bound_row["type_combo"].currentData()
+        is_time = btype == "time"
+        is_event = btype == "event"
+        is_frame = not is_time and not is_event
+        bound_row["frame_spin"].setVisible(visible and is_frame)
+        bound_row["time_spin"].setVisible(visible and is_time)
         bound_row["event_combo"].setVisible(visible and is_event)
         bound_row["instance_spin"].setVisible(visible and is_event)
 
@@ -884,14 +947,16 @@ class DetectEventStepDialog(QDialog):
             params["direction"] = self.direction_combo.currentData()
             if self.hysteresis_spin.value() > 0:
                 params["hysteresis"] = float(self.hysteresis_spin.value())
+            # G1: refractory is authored in SECONDS (clock-independent). New/edited
+            # steps write min_distance_s; the legacy frame key is no longer written.
             if self.min_distance_spin.value() > 0:
-                params["min_distance"] = int(self.min_distance_spin.value())
+                params["min_distance_s"] = float(self.min_distance_spin.value())
         elif method == "peak":
             params["kind"] = self.kind_combo.currentData()
             if self.prominence_spin.value() > 0:
                 params["prominence"] = float(self.prominence_spin.value())
             if self.min_distance_spin.value() > 0:
-                params["min_distance"] = int(self.min_distance_spin.value())
+                params["min_distance_s"] = float(self.min_distance_spin.value())
         elif method == "zero":
             params["direction"] = self.zero_dir_combo.currentData()
 
@@ -1663,7 +1728,30 @@ _COMPUTE_METHOD_LABELS = {
     "integral": "Integral (accumulate over time)",
     "magnitude": "Magnitude (resultant of axes)",
     "abs": "Absolute value |x|",
+    "xcom": "Extrapolated CoM (XCOM, Hof 2005)",
 }
+
+
+#: Standing whole-body COM height as a fraction of stature — the usual quick
+#: estimate of the inverted-pendulum length L for XCOM when no measured value is
+#: available (de Leva-consistent; ~0.55 for adults). Only a SUGGESTION: the user
+#: may instead enter a length they measured from markers.
+STANDING_COM_HEIGHT_FRACTION = 0.55
+
+
+def suggested_pendulum_length_m(height_m):
+    """A suggested XCOM pendulum length L (metres) from subject stature, or
+    ``None`` when no usable height is known (so nothing is ever invented).
+
+    ``L ≈ 0.55 × height``. A non-finite / non-positive height -> ``None``.
+    """
+    try:
+        h = float(height_m)
+    except (TypeError, ValueError):
+        return None
+    if not (h > 0) or h != h:        # non-positive or NaN
+        return None
+    return STANDING_COM_HEIGHT_FRACTION * h
 
 
 class ComputeStepDialog(QDialog):
@@ -1684,8 +1772,10 @@ class ComputeStepDialog(QDialog):
     angles); ``metric_refs`` = names of metrics already defined earlier (for the
     Normalize "÷ a metric" option, e.g. body mass)."""
 
-    def __init__(self, parent, inputs, step=None, metric_refs=None):
+    def __init__(self, parent, inputs, step=None, metric_refs=None,
+                 suggested_length_m=None):
         super().__init__(parent)
+        self._suggested_length_m = suggested_length_m
         self.setWindowTitle("Edit Compute Signal" if step else "Add Compute Signal")
         self.setModal(True)
         self.setMinimumWidth(360)
@@ -1815,6 +1905,40 @@ class ComputeStepDialog(QDialog):
         self.kind_label = QLabel("Accumulation")
         calc.addRow(self.kind_label, self.kind_combo)
 
+        # xcom (extrapolated CoM, Hof 2005): pendulum length L in METRES (the COM
+        # height). No default — the engine returns NaN until a real length is set,
+        # so we never guess a pendulum length.
+        self.length_spin = QDoubleSpinBox()
+        self.length_spin.setRange(0.0, 3.0)
+        self.length_spin.setDecimals(3)
+        self.length_spin.setSingleStep(0.01)
+        self.length_spin.setSuffix(" m")
+        # 0 = unset: XCOM needs a real pendulum length, so show "not set" rather
+        # than a deceptive "0.000 m" (the engine returns NaN until L is given).
+        self.length_spin.setSpecialValueText("not set — XCOM is NaN")
+        _xcom_help = (
+            "Inverted-pendulum length L for XCOM = COM + velocity·√(L/g), in "
+            "METRES. Use the standing COM height (≈ 0.55 × stature, e.g. ~0.95 m "
+            "for a 1.73 m subject), or a length you measured from markers. Leave "
+            "at 0 (\"not set\") to get no value — the length is a physical input, "
+            "never guessed."
+        )
+        # A height-based SUGGESTION (hint only — never auto-filled, so the user
+        # still enters their own / a marker-measured value deliberately).
+        if self._suggested_length_m and self._suggested_length_m > 0:
+            _xcom_help += (
+                f"\nSuggested for this subject: ~{self._suggested_length_m:.2f} m "
+                "(0.55 × height). Type it in to use it."
+            )
+        self.length_spin.setToolTip(_xcom_help)
+        try:
+            self.length_spin.setValue(float(params.get("length_m", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            self.length_spin.setValue(0.0)
+        self.length_label = QLabel("Pendulum length (COM height)")
+        self.length_label.setToolTip(_xcom_help)
+        calc.addRow(self.length_label, self.length_spin)
+
         self.calc_group = calc.box
         vb.addWidget(calc.box)
 
@@ -1864,6 +1988,7 @@ class ComputeStepDialog(QDialog):
         is_deriv = method == "derivative"
         is_integ = method == "integral"
         is_mag = method == "magnitude"
+        is_xcom = method == "xcom"
 
         # normalize: the by-mode picker, plus the constant OR metric row.
         self._set_row_visible(self.by_mode_label, self.by_mode_combo, is_norm)
@@ -1879,6 +2004,8 @@ class ComputeStepDialog(QDialog):
         self._set_row_visible(self.kind_label, self.kind_combo, is_integ)
         # magnitude: extra component axes (the OTHER signals to combine).
         self._set_row_visible(self.extra_label, self.extra_list, is_mag)
+        # xcom: the inverted-pendulum length (COM height, metres).
+        self._set_row_visible(self.length_label, self.length_spin, is_xcom)
         self._relayout()
 
     def _checked_extra(self):
@@ -1921,6 +2048,10 @@ class ComputeStepDialog(QDialog):
                              "kind": self.kind_combo.currentData() or "cumulative"}
         elif method == "magnitude":
             out["inputs"] = self._checked_extra()
+        elif method == "xcom":
+            # length_m of 0 -> omit so the engine yields NaN (no guessed length).
+            L = float(self.length_spin.value())
+            out["params"] = {"length_m": L} if L > 0 else {}
         return out
 
     def accept(self):
@@ -1950,6 +2081,8 @@ class AddStepDialog(QDialog):
 
     #: (kind, display label) in list order. Edit reuses the per-step dialogs.
     COMMANDS = [
+        ("preset_walk_treadmill", "Walk (treadmill)"),
+        ("preset_walk_overground", "Walk (overground)"),
         ("filter", "Filter"),
         ("compute_angle", "Compute joint angles"),
         ("compute", "Compute signal"),
@@ -1962,7 +2095,9 @@ class AddStepDialog(QDialog):
     #: Commands grouped by what they DO (Visual3D-style command grouping), so the
     #: picker reads as a tidy menu instead of a flat list: Process makes/derives
     #: signals, Detect marks events, Measure produces metric numbers.
+    #: "Quick start" is first so beginners see it immediately.
     GROUPS = [
+        ("Quick start", ["preset_walk_treadmill", "preset_walk_overground"]),
         ("Process", ["filter", "compute_angle", "compute", "trajectory"]),
         ("Detect",  ["detect_event"]),
         ("Measure", ["metric", "normalize"]),
@@ -2030,6 +2165,41 @@ class AddStepDialog(QDialog):
         self._form_scroll.setWidget(self.stack)
 
         self.forms = {}
+        # Preset info pages: a minimal QWidget with a description label.
+        # The loop below calls setWindowFlags + findChild(QDialogButtonBox) on
+        # every form; a plain QWidget satisfies both (no flags to change, no
+        # button box child) — so no special-casing is needed in the loop.
+        _preset_descriptions = {
+            "preset_walk_treadmill": (
+                "Walk (treadmill)",
+                "Seeds a full walking-analysis pipeline "
+                "(filter → events → spatiotemporal, joint kinematics, "
+                "normalized curves). Steps are fully editable after adding."
+            ),
+            "preset_walk_overground": (
+                "Walk (overground)",
+                "Seeds a full walking-analysis pipeline tuned for overground "
+                "walking (filter → events → spatiotemporal, joint "
+                "kinematics, normalized curves). Steps are fully editable after adding."
+            ),
+        }
+        for _pk, (_ptitle, _pdesc) in _preset_descriptions.items():
+            _pw = QWidget(self)
+            _pvb = QVBoxLayout(_pw)
+            _pvb.setContentsMargins(12, 12, 12, 12)
+            _pvb.setSpacing(8)
+            _title_lbl = QLabel(_ptitle)
+            _title_font = _title_lbl.font()
+            _title_font.setPointSize(_title_font.pointSize() + 1)
+            _title_font.setBold(True)
+            _title_lbl.setFont(_title_font)
+            _pvb.addWidget(_title_lbl)
+            _desc_lbl = QLabel(_pdesc)
+            _desc_lbl.setWordWrap(True)
+            _desc_lbl.setObjectName("field-label")
+            _pvb.addWidget(_desc_lbl)
+            _pvb.addStretch(1)
+            self.forms[_pk] = _pw
         self.forms["filter"] = FilterStepDialog(self, ctx.get("filter_targets", []))
         self.forms["compute_angle"] = ComputeAngleStepDialog(
             self, ctx.get("compute_angle_joints", []))
@@ -2092,8 +2262,13 @@ class AddStepDialog(QDialog):
         return kind or self.COMMANDS[0][0]
 
     def values(self):
-        """``(kind, form_values)`` for the selected command."""
+        """``(kind, form_values)`` for the selected command.
+
+        Preset kinds have no parameter form — they return ``{}`` immediately so
+        the caller does not need to call ``.values()`` on a plain QWidget."""
         kind = self.selected_kind()
+        if kind.startswith("preset_"):
+            return kind, {}
         return kind, self.forms[kind].values()
 
     def accept(self):
@@ -2117,6 +2292,13 @@ class AddStepDialog(QDialog):
                 return
         elif kind == "metric" and tab is not None and hasattr(tab, "_validate_metric_vals"):
             if not tab._validate_metric_vals(vals):
+                return
+        elif kind == "normalize":
+            # Mirror metric/detect: a missing output name keeps THIS popup open
+            # (instead of closing first and then discarding the input).
+            if not (vals or {}).get("name"):
+                QMessageBox.information(self, "Output name",
+                                        "Enter a name for the normalized output.")
                 return
         super().accept()
 
