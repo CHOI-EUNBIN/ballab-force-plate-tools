@@ -14,8 +14,8 @@ from core import rag_client
 
 # 빈 상태 예시 질문 2개(세로). mode는 항상 auto.
 EXAMPLES = [
-    "step width SD가 뭔가요?",
-    "결과를 어떻게 내보내나요?",
+    "What is step width SD?",
+    "How do I export results?",
 ]
 
 
@@ -98,7 +98,7 @@ class AiAssistantPanel(QWidget):
         status.setContentsMargins(12, 8, 12, 4)
         self.status_dot = QLabel()
         self.status_dot.setObjectName("statusDot")
-        self.status_text = QLabel("연결 확인 중")
+        self.status_text = QLabel("Checking…")
         self.status_text.setObjectName("statusText")
         status.addWidget(self.status_dot)
         status.addWidget(self.status_text)
@@ -125,7 +125,7 @@ class AiAssistantPanel(QWidget):
         hb.setSpacing(4)
         self.input = QLineEdit()
         self.input.setObjectName("chatInput")
-        self.input.setPlaceholderText("메시지 입력…")
+        self.input.setPlaceholderText("Type a message…")
         self.input.returnPressed.connect(self._on_ask)
         self.send_btn = QPushButton("↑")
         self.send_btn.setObjectName("sendBtn")
@@ -204,7 +204,7 @@ class AiAssistantPanel(QWidget):
         icon_row.addWidget(icon)
         icon_row.addStretch(1)
         v.addLayout(icon_row)
-        prompt = QLabel("문헌·사용법을 물어보세요")
+        prompt = QLabel("Ask about the literature or how to use the app")
         prompt.setObjectName("emptyPrompt")
         prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(prompt)
@@ -243,7 +243,7 @@ class AiAssistantPanel(QWidget):
         v = QVBoxLayout(box)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(4)
-        body = QLabel("검색·답변 생성 중")
+        body = QLabel("Generating")
         body.setObjectName("answerBody")
         body.setTextFormat(Qt.TextFormat.PlainText)
         body.setWordWrap(True)
@@ -269,7 +269,7 @@ class AiAssistantPanel(QWidget):
         self._on_ask()
 
     def _check_health(self):
-        self.status_text.setText("연결 확인 중")
+        self.status_text.setText("Checking…")
         self._health_worker = HealthWorker(self.base_url)
         self._health_worker.result.connect(self._on_health)
         self._health_worker.start()
@@ -279,10 +279,10 @@ class AiAssistantPanel(QWidget):
             return
         if ok:
             self._set_dot(S.ACCENT_GREEN)
-            self.status_text.setText("연결됨")
+            self.status_text.setText("Connected")
         else:
             self._set_dot(S.ACCENT_RED)
-            self.status_text.setText("연결 끊김 — serve.py 확인")
+            self.status_text.setText("Disconnected — check serve.py")
 
     def _on_ask(self):
         q = self.input.text().strip()
@@ -318,7 +318,7 @@ class AiAssistantPanel(QWidget):
     def _tick(self):
         self._dots = (self._dots + 1) % 4
         if self._pending_body is not None:
-            self._pending_body.setText("검색·답변 생성 중" + "." * self._dots)
+            self._pending_body.setText("Generating" + "." * self._dots)
 
     def _stop_dots(self):
         if getattr(self, "_timer", None):
@@ -336,7 +336,7 @@ class AiAssistantPanel(QWidget):
             self._pending_body.setStyleSheet("")
             self._pending_body.setText(res.get("answer", ""))
         self._render_sources(res.get("sources", []))
-        self.status_text.setText(f"완료 ({res.get('timings', {}).get('llm', '?')}s)")
+        self.status_text.setText(f"Done ({res.get('timings', {}).get('llm', '?')}s)")
         self._scroll_bottom_later()
 
     def _render_sources(self, sources):
@@ -351,7 +351,7 @@ class AiAssistantPanel(QWidget):
             else:
                 lines.append(f"[{i}] {label}")
         if lines:
-            self._pending_src.setText("출처 · " + "  ".join(lines))
+            self._pending_src.setText("Sources · " + "  ".join(lines))
             self._pending_src.show()
 
     def _on_failed(self, msg):
@@ -366,7 +366,7 @@ class AiAssistantPanel(QWidget):
             self._pending_body.setStyleSheet(f"color: {S.ACCENT_RED};")
             self._pending_body.setText(msg)
         if self._pending_src is not None:
-            self._pending_src.setText('<a href="retry" style="color:%s;">다시 시도</a>' % S.ACCENT_TEAL)
+            self._pending_src.setText('<a href="retry" style="color:%s;">Retry</a>' % S.ACCENT_TEAL)
             self._pending_src.show()
         self._scroll_bottom_later()
 

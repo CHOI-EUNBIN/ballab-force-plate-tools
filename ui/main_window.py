@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         view_action = QAction("View...", self)
         view_action.triggered.connect(self._open_view_settings)
         settings_menu.addAction(view_action)
-        rag_action = QAction("AI 도우미 (RAG)...", self)
+        rag_action = QAction("AI Assistant (RAG)...", self)
         rag_action.triggered.connect(self._open_rag_settings)
         settings_menu.addAction(rag_action)
         settings_menu.addSeparator()
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         from ui.ai_assistant_panel import AiAssistantPanel
         url = self._qsettings.value("rag/service_url", "http://localhost:8000", type=str)
         self.ai_panel = AiAssistantPanel(self, base_url=url)
-        self.ai_dock = QDockWidget("AI 도우미", self)
+        self.ai_dock = QDockWidget("AI Assistant", self)
         self.ai_dock.setObjectName("aiDock")
         self.ai_dock.setWidget(self.ai_panel)
         # 드래그로 떼어내거나(floating) 다른 영역에 끼우다(split) 사라지는 혼란을 막기 위해
@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.ai_dock], [360], Qt.Orientation.Horizontal)
         self.ai_dock.hide()  # 시작 시 숨김 — 토글로 표시
         toggle = self.ai_dock.toggleViewAction()
-        toggle.setText("AI 도우미 (문헌·사용법 질문)")
+        toggle.setText("AI Assistant")
         self._help_menu.addAction(toggle)
 
     def _open_metrics_help(self):

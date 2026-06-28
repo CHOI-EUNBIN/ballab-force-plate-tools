@@ -23,7 +23,7 @@ def test_ask_connection_error(monkeypatch):
     monkeypatch.setattr(rag_client.requests, "post", boom)
     with pytest.raises(rag_client.RagError) as e:
         rag_client.ask("http://x", "q")
-    assert "연결할 수 없습니다" in str(e.value)
+    assert "Cannot connect" in str(e.value)
 
 
 def test_ask_llm_502_message(monkeypatch):
@@ -39,7 +39,7 @@ def test_ask_timeout(monkeypatch):
     monkeypatch.setattr(rag_client.requests, "post", boom)
     with pytest.raises(rag_client.RagError) as e:
         rag_client.ask("http://x", "q")
-    assert "오래 걸립니다" in str(e.value)
+    assert "taking too long" in str(e.value)
 
 
 def test_health_success(monkeypatch):

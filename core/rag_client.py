@@ -11,9 +11,9 @@ def health(base_url, timeout=3):
     try:
         r = requests.get(base_url.rstrip("/") + "/health", timeout=timeout)
     except requests.exceptions.ConnectionError:
-        raise RagError(f"RAG 서비스에 연결할 수 없습니다. (URL: {base_url})")
+        raise RagError(f"Cannot connect to the RAG service. (URL: {base_url})")
     except requests.exceptions.Timeout:
-        raise RagError("응답이 너무 오래 걸립니다. 다시 시도해주세요.")
+        raise RagError("The response is taking too long. Please try again.")
     r.raise_for_status()
     return r.json()
 
@@ -23,18 +23,18 @@ def ask(base_url, question, mode="auto", timeout=120):
     try:
         r = requests.post(url, json={"question": question, "mode": mode}, timeout=timeout)
     except requests.exceptions.ConnectionError:
-        raise RagError(f"RAG 서비스에 연결할 수 없습니다. 서버에서 serve.py가 켜져 있는지 확인하세요. (URL: {base_url})")
+        raise RagError(f"Cannot connect to the RAG service. Make sure serve.py is running. (URL: {base_url})")
     except requests.exceptions.Timeout:
-        raise RagError("응답이 너무 오래 걸립니다. 다시 시도해주세요.")
+        raise RagError("The response is taking too long. Please try again.")
     if r.status_code == 502:
         msg = ""
         try:
             msg = r.json().get("error", "")
         except (ValueError, AttributeError):
             pass
-        raise RagError(msg or "LM Studio가 꺼져 있는 것 같습니다.")
+        raise RagError(msg or "LM Studio appears to be offline.")
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:
-        raise RagError(f"RAG 서비스 오류 (HTTP {r.status_code}).")
+        raise RagError(f"RAG service error (HTTP {r.status_code}).")
     return r.json()

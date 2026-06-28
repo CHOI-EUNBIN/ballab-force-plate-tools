@@ -102,14 +102,14 @@ class RagServiceDialog(_SettingsDialog):
 
     def __init__(self, parent):
         super().__init__(
-            parent, "AI 도우미 (RAG) 설정",
-            "RAG 서비스(serve.py) 주소입니다. 보통 http://localhost:8000 입니다. "
-            "공용 서버를 쓰면 그 주소로 바꾸세요.",
+            parent, "AI Assistant (RAG) Settings",
+            "Address of the RAG service (serve.py). Usually http://localhost:8000. "
+            "Point it to a shared server if you use one.",
         )
         self._qsettings = QSettings("Balancelab", "Balancelab")
         row = QHBoxLayout()
         row.setSpacing(12)
-        label = QLabel("서비스 URL")
+        label = QLabel("Service URL")
         label.setStyleSheet(style.label_style(style.TEXT_PRIMARY, 12))
         self._url_edit = QLineEdit(
             self._qsettings.value("rag/service_url", "http://localhost:8000", type=str))
