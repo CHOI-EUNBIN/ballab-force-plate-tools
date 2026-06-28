@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QPushButton, QTextBrowser,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 
 from ui import style as S
@@ -21,7 +21,11 @@ MODES = [("자동", "auto"), ("사용법", "manual"), ("논문", "paper")]
 
 def doi_url(doi):
     doi = (doi or "").strip()
-    return f"https://doi.org/{doi}" if doi else ""
+    if not doi:
+        return ""
+    if doi.startswith("http"):
+        return doi
+    return f"https://doi.org/{doi}"
 
 
 class AskWorker(QThread):
@@ -49,11 +53,27 @@ class AskWorker(QThread):
                 self.failed.emit(f"예상치 못한 오류: {e}")
 
 
+class HealthWorker(QThread):
+    result = pyqtSignal(bool)
+
+    def __init__(self, base_url):
+        super().__init__()
+        self.base_url = base_url
+
+    def run(self):
+        try:
+            rag_client.health(self.base_url)
+            self.result.emit(True)
+        except Exception:
+            self.result.emit(False)
+
+
 class AiAssistantPanel(QWidget):
     def __init__(self, parent=None, base_url="http://localhost:8000"):
         super().__init__(parent)
         self.base_url = base_url
         self._worker = None
+        self._health_worker = None
         self._closing = False
         self._dots = 0
         self.setObjectName("aiPanel")
@@ -152,11 +172,18 @@ class AiAssistantPanel(QWidget):
                 self.mode.setCurrentIndex(i)
 
     def _check_health(self):
-        try:
-            rag_client.health(self.base_url)
+        self.status_text.setText("연결 확인 중…")
+        self._health_worker = HealthWorker(self.base_url)
+        self._health_worker.result.connect(self._on_health)
+        self._health_worker.start()
+
+    def _on_health(self, ok):
+        if self._closing:
+            return
+        if ok:
             self._set_dot(S.ACCENT_GREEN)
             self.status_text.setText("연결됨")
-        except Exception:
+        else:
             self._set_dot(S.ACCENT_RED)
             self.status_text.setText("연결 끊김 — serve.py가 켜져 있는지 확인하세요")
 
@@ -177,6 +204,8 @@ class AiAssistantPanel(QWidget):
         self._worker.start()
 
     def _start_dots(self):
+        if getattr(self, "_timer", None):
+            self._timer.stop()
         self._dots = 0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -192,6 +221,7 @@ class AiAssistantPanel(QWidget):
             self._timer.stop()
         self.ask_btn.setEnabled(True)
         self.ask_btn.setText("질문")
+        self.status_text.setStyleSheet("")  # 이전 에러 빨강색 해제
 
     def _on_done(self, res):
         if self._closing:
@@ -227,9 +257,21 @@ class AiAssistantPanel(QWidget):
         self._check_health()
 
     def shutdown(self):
-        """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지).
-        패널은 dock에 임베드돼 자체 closeEvent를 못 받으므로 외부에서 호출한다."""
+        """앱 종료 시 메인 창의 closeEvent에서 호출 — 워커 정리(크래시 방지)."""
         self._closing = True
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)
+            if self._worker.isRunning():
+                try:
+                    self._worker.done.disconnect()
+                    self._worker.failed.disconnect()
+                except Exception:
+                    pass
+        if self._health_worker and self._health_worker.isRunning():
+            self._health_worker.wait(2000)
+            if self._health_worker.isRunning():
+                try:
+                    self._health_worker.result.disconnect()
+                except Exception:
+                    pass
