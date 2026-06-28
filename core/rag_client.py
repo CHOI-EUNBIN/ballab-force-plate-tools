@@ -8,7 +8,12 @@ class RagError(Exception):
 
 
 def health(base_url, timeout=3):
-    r = requests.get(base_url.rstrip("/") + "/health", timeout=timeout)
+    try:
+        r = requests.get(base_url.rstrip("/") + "/health", timeout=timeout)
+    except requests.exceptions.ConnectionError:
+        raise RagError(f"RAG 서비스에 연결할 수 없습니다. (URL: {base_url})")
+    except requests.exceptions.Timeout:
+        raise RagError("응답이 너무 오래 걸립니다. 다시 시도해주세요.")
     r.raise_for_status()
     return r.json()
 
@@ -25,7 +30,7 @@ def ask(base_url, question, mode="auto", timeout=120):
         msg = ""
         try:
             msg = r.json().get("error", "")
-        except Exception:
+        except (ValueError, AttributeError):
             pass
         raise RagError(msg or "LM Studio가 꺼져 있는 것 같습니다.")
     try:

@@ -1,4 +1,3 @@
-import types
 import pytest
 from core import rag_client
 
@@ -41,3 +40,9 @@ def test_ask_timeout(monkeypatch):
     with pytest.raises(rag_client.RagError) as e:
         rag_client.ask("http://x", "q")
     assert "오래 걸립니다" in str(e.value)
+
+
+def test_health_success(monkeypatch):
+    monkeypatch.setattr(rag_client.requests, "get",
+                        lambda *a, **k: _Resp(200, {"ok": True, "model": "m", "count": 5}))
+    assert rag_client.health("http://x")["count"] == 5
