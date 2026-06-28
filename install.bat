@@ -88,6 +88,10 @@ echo  - Installing openpyxl...
 !PYTHON! -m pip install "openpyxl>=3.1.0" --quiet
 if errorlevel 1 ( echo  [ERROR] openpyxl install failed & set INSTALL_OK=0 ) else ( echo  [OK] openpyxl )
 
+echo  - Installing requests...
+!PYTHON! -m pip install "requests>=2.28.0" --quiet
+if errorlevel 1 ( echo  [ERROR] requests install failed & set INSTALL_OK=0 ) else ( echo  [OK] requests )
+
 echo  - Installing qtm_rt...
 !PYTHON! -m pip install "qtm-rt>=3.0.0,<4.0.0" --quiet
 if errorlevel 1 (

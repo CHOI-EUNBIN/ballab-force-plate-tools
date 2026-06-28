@@ -44,7 +44,7 @@ if errorlevel 1 (
 )
 
 echo [3/3] Installing required packages...
-".venv\Scripts\python.exe" -m pip install "PyQt6>=6.5.0" "pyqtgraph>=0.13.0" "numpy>=1.24.0" "scipy>=1.10.0" "pyinstaller>=6.0.0" "openpyxl>=3.1.0"
+".venv\Scripts\python.exe" -m pip install "PyQt6>=6.5.0" "pyqtgraph>=0.13.0" "numpy>=1.24.0" "scipy>=1.10.0" "pyinstaller>=6.0.0" "openpyxl>=3.1.0" "requests>=2.28.0"
 if errorlevel 1 (
     echo [ERROR] Failed to install required packages.
     pause
