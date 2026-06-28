@@ -2,7 +2,10 @@
 minimum time, then fades out. A frameless, translucent, always-on-top widget so
 only the transparent-PNG logo is visible over the brief pre-paint flash."""
 
-from PyQt6.QtCore import Qt, QRectF, pyqtProperty
+from PyQt6.QtCore import (
+    Qt, QRectF, QTimer, QElapsedTimer, QPropertyAnimation, QEasingCurve,
+    pyqtProperty,
+)
 from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QApplication, QWidget
 
@@ -68,3 +71,39 @@ class AnimatedSplash(QWidget):
         painter.drawPixmap(self.target_rect(), self._pixmap,
                            QRectF(self._pixmap.rect()))
         painter.end()
+
+    def start(self):
+        self._elapsed = QElapsedTimer()
+        self._elapsed.start()
+        self._fade = QPropertyAnimation(self, b"opacity", self)
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._fade.setDuration(INTRO_FADE_MS)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._scale_anim = QPropertyAnimation(self, b"scale", self)
+        self._scale_anim.setStartValue(SCALE_FROM)
+        self._scale_anim.setEndValue(1.0)
+        self._scale_anim.setDuration(INTRO_SCALE_MS)
+        self._scale_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade.start()
+        self._scale_anim.start()
+
+    def finish_delay_ms(self, elapsed):
+        return max(0, MIN_DISPLAY_MS - int(elapsed))
+
+    def finish(self, win):
+        self._win = win
+        elapsed = self._elapsed.elapsed() if hasattr(self, "_elapsed") else 0
+        QTimer.singleShot(self.finish_delay_ms(elapsed), self._outro)
+
+    def _outro(self):
+        if getattr(self, "_win", None) is not None:
+            self._win.raise_()
+            self._win.activateWindow()
+        self._fade_out = QPropertyAnimation(self, b"opacity", self)
+        self._fade_out.setStartValue(self._opacity)
+        self._fade_out.setEndValue(0.0)
+        self._fade_out.setDuration(OUTRO_FADE_MS)
+        self._fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._fade_out.finished.connect(self.close)
+        self._fade_out.start()
