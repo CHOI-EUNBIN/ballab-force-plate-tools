@@ -57,32 +57,40 @@ def main():
     app.installEventFilter(app_guard())
     app.setWindowIcon(QIcon(resource_path("assets/ballab_icon_master_1024_transparent.png")))
 
-    # Logo splash shown while the (heavy) main window is built. Logo only, no
-    # text; it stays up until the window is ready, then fades out. A translucent
-    # background means only the transparent-PNG logo is visible — and it covers
-    # the brief white flash before the UI paints.
-    from PyQt6.QtWidgets import QSplashScreen
-    from PyQt6.QtCore import Qt
+    # Animated logo splash shown while the (heavy) main window is built. The
+    # logo fades in while scaling up, holds for a minimum time, then fades out.
+    # A translucent background means only the transparent-PNG logo is visible —
+    # it also covers the brief white flash before the UI paints.
+    from PyQt6.QtCore import QTimer
+    from ui.splash import AnimatedSplash
     QPixmap = qt_gui.QPixmap
-    splash = None
+
     logo = QPixmap(resource_path("assets/ballab_icon_master_1024_transparent.png"))
+    splash = None
     if not logo.isNull():
-        logo = logo.scaled(
-            320, 320,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        splash = QSplashScreen(logo, Qt.WindowType.WindowStaysOnTopHint)
-        splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        splash = AnimatedSplash(logo)
         splash.show()
+        splash.start()
         app.processEvents()
 
-    win = MainWindow(qtm_ip=args.ip)
-    win.show()
+    state = {}
+
+    def build():
+        win = MainWindow(qtm_ip=args.ip)
+        state["win"] = win                      # keep a reference past this scope
+        win.show()
+        if args.project and os.path.isfile(args.project):
+            win.open_project_path(args.project)
+        if splash is not None:
+            splash.finish(win)
+
     if splash is not None:
-        splash.finish(win)
-    if args.project and os.path.isfile(args.project):
-        win.open_project_path(args.project)
+        # Defer the heavy build so the event loop runs first and the intro
+        # animation paints a few frames before the build briefly blocks it.
+        QTimer.singleShot(50, build)
+    else:
+        build()
+
     sys.exit(app.exec())
 
 

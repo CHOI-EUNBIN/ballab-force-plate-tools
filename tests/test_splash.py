@@ -90,3 +90,12 @@ def test_outro_starts_fade_to_zero_and_reveals_window(app):
     assert fw.raised and fw.activated
     assert w._fade_out.endValue() == 0.0
     assert w._fade_out.duration() == s.OUTRO_FADE_MS
+
+
+def test_main_uses_animated_splash_and_defers_build():
+    import inspect
+    import main
+    src = inspect.getsource(main.main)
+    assert "AnimatedSplash" in src
+    assert "QSplashScreen" not in src
+    assert "singleShot" in src
