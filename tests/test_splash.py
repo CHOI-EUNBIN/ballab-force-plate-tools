@@ -27,7 +27,7 @@ def test_initial_state_is_transparent_and_small(app):
     assert w.width() == s.WIDGET_SIZE and w.height() == s.WIDGET_SIZE
 
 
-def test_setters_clamp_and_request_repaint(app):
+def test_setters_store_value(app):
     w = _make(app)
     w.opacity = 0.5
     w.scale = 1.0

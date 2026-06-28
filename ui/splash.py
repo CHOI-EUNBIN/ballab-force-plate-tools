@@ -4,7 +4,7 @@ only the transparent-PNG logo is visible over the brief pre-paint flash."""
 
 from PyQt6.QtCore import Qt, QRectF, pyqtProperty
 from PyQt6.QtGui import QPainter
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QApplication, QWidget
 
 BASE_SIZE = 300        # logo side length (px) at scale 1.0
 WIDGET_SIZE = 360      # widget side; padding so the scaled logo never clips
@@ -28,8 +28,8 @@ class AnimatedSplash(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(WIDGET_SIZE, WIDGET_SIZE)
-        screen = self.screen() or (self.windowHandle() and self.windowHandle().screen())
-        geo = (screen.availableGeometry() if screen else None)
+        screen = QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen is not None else None
         if geo is not None:
             self.move(geo.center().x() - WIDGET_SIZE // 2,
                       geo.center().y() - WIDGET_SIZE // 2)
