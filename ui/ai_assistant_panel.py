@@ -149,8 +149,6 @@ class AiAssistantPanel(QWidget):
                 border-radius: 4px; background: {S.TEXT_MUTED}; }}
             QLabel#emptyPrompt {{ color: {S.TEXT_MUTED}; font-family: {S.FONT_FAMILY};
                 font-size: {S.FONT_SIZE_BASE}; }}
-            QFrame#emptyIcon {{ border: 1px solid {S.BORDER}; border-radius: {S.BORDER_RADIUS_MD};
-                background: transparent; }}
             QLabel#userBubble {{ background: {S.BG_HOVER}; color: {S.TEXT_PRIMARY};
                 font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE};
                 border-radius: {S.BORDER_RADIUS_LG}; border-top-right-radius: 2px;
@@ -196,14 +194,6 @@ class AiAssistantPanel(QWidget):
         center = QWidget()
         v = QVBoxLayout(center)
         v.setSpacing(10)
-        icon_row = QHBoxLayout()
-        icon = QFrame()
-        icon.setObjectName("emptyIcon")
-        icon.setFixedSize(44, 44)
-        icon_row.addStretch(1)
-        icon_row.addWidget(icon)
-        icon_row.addStretch(1)
-        v.addLayout(icon_row)
         prompt = QLabel("Ask about the literature or how to use the app")
         prompt.setObjectName("emptyPrompt")
         prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
