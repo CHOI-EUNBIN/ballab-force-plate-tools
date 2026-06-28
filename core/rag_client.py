@@ -18,10 +18,13 @@ def health(base_url, timeout=3):
     return r.json()
 
 
-def ask(base_url, question, mode="auto", timeout=120):
+def ask(base_url, question, mode="auto", history=None, timeout=120):
     url = base_url.rstrip("/") + "/ask"
+    payload = {"question": question, "mode": mode}
+    if history:
+        payload["history"] = history
     try:
-        r = requests.post(url, json={"question": question, "mode": mode}, timeout=timeout)
+        r = requests.post(url, json=payload, timeout=timeout)
     except requests.exceptions.ConnectionError:
         raise RagError(f"Cannot connect to the RAG service. Make sure serve.py is running. (URL: {base_url})")
     except requests.exceptions.Timeout:

@@ -32,9 +32,10 @@ class AskWorker(QThread):
     done = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, base_url, question, mode):
+    def __init__(self, base_url, question, mode, history=None):
         super().__init__()
         self.base_url, self.question, self.mode = base_url, question, mode
+        self.history = history or []
         self._cancelled = False
 
     def cancel(self):
@@ -42,7 +43,7 @@ class AskWorker(QThread):
 
     def run(self):
         try:
-            res = rag_client.ask(self.base_url, self.question, self.mode)
+            res = rag_client.ask(self.base_url, self.question, self.mode, history=self.history)
             if not self._cancelled:
                 self.done.emit(res)
         except rag_client.RagError as e:
@@ -78,6 +79,7 @@ class AiAssistantPanel(QWidget):
         self._dots = 0
         self._has_messages = False
         self._last_question = ""
+        self._history = []  # 멀티턴: 최근 대화 [{role, content}, ...]
         self._pending_body = None
         self._pending_src = None
         self.setObjectName("aiPanel")
@@ -287,7 +289,7 @@ class AiAssistantPanel(QWidget):
         self._set_busy(True)
         self._start_dots()
         self._scroll_bottom_later()
-        self._worker = AskWorker(self.base_url, q, "auto")
+        self._worker = AskWorker(self.base_url, q, "auto", history=list(self._history))
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
@@ -322,9 +324,15 @@ class AiAssistantPanel(QWidget):
         if res.get("error"):  # 방어적(서비스가 200으로 error 준 경우)
             self._render_error(res["error"])
             return
+        answer_text = res.get("answer", "")
         if self._pending_body is not None:
             self._pending_body.setStyleSheet("")
-            self._pending_body.setText(res.get("answer", ""))
+            self._pending_body.setText(answer_text)
+        # 멀티턴: 성공한 질문/답변을 대화 기억에 추가(최근 3턴=6메시지만 유지)
+        if answer_text:
+            self._history.append({"role": "user", "content": self._last_question})
+            self._history.append({"role": "assistant", "content": answer_text})
+            self._history = self._history[-6:]
         self._render_sources(res.get("sources", []))
         self.status_text.setText(f"Done ({res.get('timings', {}).get('llm', '?')}s)")
         self._scroll_bottom_later()
