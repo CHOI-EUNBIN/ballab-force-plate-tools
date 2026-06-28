@@ -58,6 +58,7 @@ def test_start_builds_intro_anims_with_correct_params(app):
     assert w._scale_anim.startValue() == s.SCALE_FROM
     assert w._scale_anim.endValue() == 1.0
     assert w._scale_anim.duration() == s.INTRO_SCALE_MS
+    assert w._scale_anim.easingCurve().type() == QEasingCurve.Type.OutCubic
 
 
 def test_finish_delay_respects_minimum(app):
@@ -69,6 +70,7 @@ def test_finish_delay_respects_minimum(app):
 
 
 def test_outro_starts_fade_to_zero_and_reveals_window(app):
+    from ui import splash as s
     w = _make(app)
     w.start()
     w._opacity = 1.0
@@ -87,4 +89,4 @@ def test_outro_starts_fade_to_zero_and_reveals_window(app):
     w._outro()
     assert fw.raised and fw.activated
     assert w._fade_out.endValue() == 0.0
-    assert w._fade_out.duration() == 350
+    assert w._fade_out.duration() == s.OUTRO_FADE_MS
