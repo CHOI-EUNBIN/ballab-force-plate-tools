@@ -157,7 +157,7 @@ class AiAssistantPanel(QWidget):
                 font-size: {S.FONT_SIZE_BASE}; }}
             QLabel#userBubble {{ background: {S.BG_HOVER}; color: {S.TEXT_PRIMARY};
                 font-family: {S.FONT_FAMILY}; font-size: {S.FONT_SIZE_BASE};
-                border-radius: {S.BORDER_RADIUS_LG}; border-top-right-radius: 2px;
+                border-radius: {S.BORDER_RADIUS_MD};
                 padding: {S.SPACING_SM} {S.SPACING_MD}; }}
             QLabel#answerBody {{ color: {S.TEXT_PRIMARY}; font-family: {S.FONT_FAMILY};
                 font-size: {S.FONT_SIZE_BASE}; padding: {S.SPACING_XS} 0; }}
@@ -229,9 +229,7 @@ class AiAssistantPanel(QWidget):
         lab.setObjectName("userBubble")
         lab.setTextFormat(Qt.TextFormat.PlainText)
         lab.setWordWrap(True)
-        lab.setMaximumWidth(280)
-        h.addStretch(1)
-        h.addWidget(lab)
+        h.addWidget(lab, 1)  # 우측 좁은 칩 대신 전체 폭으로 길게
         self._append(row)
 
     def _add_answer_block(self):
